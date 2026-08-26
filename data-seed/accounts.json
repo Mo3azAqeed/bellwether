@@ -1,0 +1,542 @@
+[
+  {
+    "account_id": "acct-001",
+    "name": "Northwind",
+    "plan": "Starter",
+    "seats_purchased": 10,
+    "usage_pattern": "cliff",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-04-25"
+  },
+  {
+    "account_id": "acct-002",
+    "name": "Lumen Labs",
+    "plan": "Growth",
+    "seats_purchased": 13,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-02-07"
+  },
+  {
+    "account_id": "acct-003",
+    "name": "Larkspur Ventures",
+    "plan": "Starter",
+    "seats_purchased": 10,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-08-04"
+  },
+  {
+    "account_id": "acct-004",
+    "name": "Larkspur Labs",
+    "plan": "Growth",
+    "seats_purchased": 18,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-06-13"
+  },
+  {
+    "account_id": "acct-005",
+    "name": "Gladstone Industries",
+    "plan": "Enterprise",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-12-29"
+  },
+  {
+    "account_id": "acct-006",
+    "name": "Clearwater Digital",
+    "plan": "Enterprise",
+    "seats_purchased": 21,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-04-21"
+  },
+  {
+    "account_id": "acct-007",
+    "name": "Ridge Networks",
+    "plan": "Growth",
+    "seats_purchased": 18,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-07-21"
+  },
+  {
+    "account_id": "acct-008",
+    "name": "Gladstone Ventures",
+    "plan": "Starter",
+    "seats_purchased": 13,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-08-20"
+  },
+  {
+    "account_id": "acct-009",
+    "name": "Clearwater Technologies",
+    "plan": "Enterprise",
+    "seats_purchased": 19,
+    "usage_pattern": "cliff",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-01-11"
+  },
+  {
+    "account_id": "acct-010",
+    "name": "Ashgrove Industries",
+    "plan": "Enterprise",
+    "seats_purchased": 19,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-04-18"
+  },
+  {
+    "account_id": "acct-011",
+    "name": "Silver Partners",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-03-19"
+  },
+  {
+    "account_id": "acct-012",
+    "name": "Rosewood Dynamics",
+    "plan": "Enterprise",
+    "seats_purchased": 20,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-08-06"
+  },
+  {
+    "account_id": "acct-013",
+    "name": "Pinecrest Industries",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-06-08"
+  },
+  {
+    "account_id": "acct-014",
+    "name": "Cinderfield Digital",
+    "plan": "Enterprise",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-04-20"
+  },
+  {
+    "account_id": "acct-015",
+    "name": "Cobalt Cloud",
+    "plan": "Enterprise",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-02-12"
+  },
+  {
+    "account_id": "acct-016",
+    "name": "Hearthstone Solutions",
+    "plan": "Enterprise",
+    "seats_purchased": 16,
+    "usage_pattern": "cliff",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-05-09"
+  },
+  {
+    "account_id": "acct-017",
+    "name": "Onyx Systems",
+    "plan": "Starter",
+    "seats_purchased": 12,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-02-26"
+  },
+  {
+    "account_id": "acct-018",
+    "name": "Stonebridge Works",
+    "plan": "Growth",
+    "seats_purchased": 12,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-08-18"
+  },
+  {
+    "account_id": "acct-019",
+    "name": "Anchor Solutions",
+    "plan": "Enterprise",
+    "seats_purchased": 22,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-03-27"
+  },
+  {
+    "account_id": "acct-020",
+    "name": "Redshift Networks",
+    "plan": "Starter",
+    "seats_purchased": 9,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2026-12-02"
+  },
+  {
+    "account_id": "acct-021",
+    "name": "Willow Solutions",
+    "plan": "Growth",
+    "seats_purchased": 13,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-07-25"
+  },
+  {
+    "account_id": "acct-022",
+    "name": "Quartz Analytics",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "cliff",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-11-21"
+  },
+  {
+    "account_id": "acct-023",
+    "name": "Ironwood Cloud",
+    "plan": "Growth",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2026-10-16"
+  },
+  {
+    "account_id": "acct-024",
+    "name": "Foxglove Digital",
+    "plan": "Starter",
+    "seats_purchased": 7,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-10-26"
+  },
+  {
+    "account_id": "acct-025",
+    "name": "Crescent Cloud",
+    "plan": "Enterprise",
+    "seats_purchased": 20,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-07-14"
+  },
+  {
+    "account_id": "acct-026",
+    "name": "Onyx Dynamics",
+    "plan": "Starter",
+    "seats_purchased": 9,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-05-20"
+  },
+  {
+    "account_id": "acct-027",
+    "name": "North Group",
+    "plan": "Starter",
+    "seats_purchased": 6,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2026-12-24"
+  },
+  {
+    "account_id": "acct-028",
+    "name": "Palisade Analytics",
+    "plan": "Enterprise",
+    "seats_purchased": 15,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-11-17"
+  },
+  {
+    "account_id": "acct-029",
+    "name": "Vale Cloud",
+    "plan": "Starter",
+    "seats_purchased": 8,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-02-25"
+  },
+  {
+    "account_id": "acct-030",
+    "name": "Fernway Software",
+    "plan": "Starter",
+    "seats_purchased": 7,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-02-13"
+  },
+  {
+    "account_id": "acct-031",
+    "name": "Copperline Group",
+    "plan": "Growth",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-04-18"
+  },
+  {
+    "account_id": "acct-032",
+    "name": "Sable Group",
+    "plan": "Enterprise",
+    "seats_purchased": 19,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2026-10-04"
+  },
+  {
+    "account_id": "acct-033",
+    "name": "Cinderfield Partners",
+    "plan": "Enterprise",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-01-16"
+  },
+  {
+    "account_id": "acct-034",
+    "name": "Hearthstone Dynamics",
+    "plan": "Starter",
+    "seats_purchased": 8,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-05-15"
+  },
+  {
+    "account_id": "acct-035",
+    "name": "Hearthstone Industries",
+    "plan": "Growth",
+    "seats_purchased": 15,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-05-01"
+  },
+  {
+    "account_id": "acct-036",
+    "name": "Sable Industries",
+    "plan": "Starter",
+    "seats_purchased": 9,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2026-09-26"
+  },
+  {
+    "account_id": "acct-037",
+    "name": "Redshift Works",
+    "plan": "Starter",
+    "seats_purchased": 11,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2026-10-12"
+  },
+  {
+    "account_id": "acct-038",
+    "name": "Thornbury Analytics",
+    "plan": "Starter",
+    "seats_purchased": 11,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2026-11-16"
+  },
+  {
+    "account_id": "acct-039",
+    "name": "Palisade Systems",
+    "plan": "Starter",
+    "seats_purchased": 12,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-12-24"
+  },
+  {
+    "account_id": "acct-040",
+    "name": "Brook Systems",
+    "plan": "Enterprise",
+    "seats_purchased": 16,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-05-21"
+  },
+  {
+    "account_id": "acct-041",
+    "name": "Clearwater Systems",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-06-20"
+  },
+  {
+    "account_id": "acct-042",
+    "name": "Gladstone Works",
+    "plan": "Starter",
+    "seats_purchased": 11,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2026-11-21"
+  },
+  {
+    "account_id": "acct-043",
+    "name": "Windrow Group",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-05-10"
+  },
+  {
+    "account_id": "acct-044",
+    "name": "Driftwood Systems",
+    "plan": "Starter",
+    "seats_purchased": 12,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-01-22"
+  },
+  {
+    "account_id": "acct-045",
+    "name": "Nimbus Industries",
+    "plan": "Growth",
+    "seats_purchased": 14,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-10-05"
+  },
+  {
+    "account_id": "acct-046",
+    "name": "Fernway Dynamics",
+    "plan": "Growth",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-05-21"
+  },
+  {
+    "account_id": "acct-047",
+    "name": "Crescent Labs",
+    "plan": "Growth",
+    "seats_purchased": 14,
+    "usage_pattern": "stable",
+    "csm_owner": "Jordan",
+    "renewal_date": "2027-01-19"
+  },
+  {
+    "account_id": "acct-048",
+    "name": "Brook Ventures",
+    "plan": "Growth",
+    "seats_purchased": 14,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2027-07-12"
+  },
+  {
+    "account_id": "acct-049",
+    "name": "Windrow Dynamics",
+    "plan": "Enterprise",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Priya",
+    "renewal_date": "2026-12-19"
+  },
+  {
+    "account_id": "acct-050",
+    "name": "Mosswell Industries",
+    "plan": "Growth",
+    "seats_purchased": 16,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2026-10-16"
+  },
+  {
+    "account_id": "acct-051",
+    "name": "Windmere Industries",
+    "plan": "Starter",
+    "seats_purchased": 8,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2026-10-26"
+  },
+  {
+    "account_id": "acct-052",
+    "name": "Pinecrest Cloud",
+    "plan": "Growth",
+    "seats_purchased": 16,
+    "usage_pattern": "cliff",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-02-06"
+  },
+  {
+    "account_id": "acct-053",
+    "name": "Silver Digital",
+    "plan": "Growth",
+    "seats_purchased": 14,
+    "usage_pattern": "stable",
+    "csm_owner": "Sam",
+    "renewal_date": "2027-01-07"
+  },
+  {
+    "account_id": "acct-054",
+    "name": "Willow Software",
+    "plan": "Starter",
+    "seats_purchased": 11,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-01-05"
+  },
+  {
+    "account_id": "acct-055",
+    "name": "Redshift Labs",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2026-11-22"
+  },
+  {
+    "account_id": "acct-056",
+    "name": "Timbermill Cloud",
+    "plan": "Growth",
+    "seats_purchased": 12,
+    "usage_pattern": "stable",
+    "csm_owner": "Maya",
+    "renewal_date": "2026-11-21"
+  },
+  {
+    "account_id": "acct-057",
+    "name": "Rosewood Labs",
+    "plan": "Enterprise",
+    "seats_purchased": 16,
+    "usage_pattern": "cliff",
+    "csm_owner": "Maya",
+    "renewal_date": "2027-07-19"
+  },
+  {
+    "account_id": "acct-058",
+    "name": "Thornbury Solutions",
+    "plan": "Starter",
+    "seats_purchased": 10,
+    "usage_pattern": "slow_fade",
+    "csm_owner": "Jordan",
+    "renewal_date": "2026-09-28"
+  },
+  {
+    "account_id": "acct-059",
+    "name": "Thornbury Dynamics",
+    "plan": "Enterprise",
+    "seats_purchased": 18,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2027-06-08"
+  },
+  {
+    "account_id": "acct-060",
+    "name": "Palisade Solutions",
+    "plan": "Growth",
+    "seats_purchased": 17,
+    "usage_pattern": "stable",
+    "csm_owner": "Alex",
+    "renewal_date": "2026-10-12"
+  }
+]
