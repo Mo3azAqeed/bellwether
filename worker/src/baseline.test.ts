@@ -3,11 +3,11 @@ import type { DbAccount } from "./db.js";
 import type { DailyActivePoint } from "./posthog.js";
 import type { Env } from "./env.js";
 
-vi.mock("./posthog.js", () => ({
+vi.mock("./usage.js", () => ({
   getDailyActiveSeats: vi.fn(),
 }));
 
-const { getDailyActiveSeats } = await import("./posthog.js");
+const { getDailyActiveSeats } = await import("./usage.js");
 const { computeHealth } = await import("./baseline.js");
 
 const NOW = new Date("2026-09-10T00:00:00Z");

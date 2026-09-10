@@ -35,7 +35,7 @@ Sources:
 
 | Piece | What it does |
 |---|---|
-| **PostHog** | Source of truth for product usage (`app_opened` events, grouped by account) |
+| **PostHog or Mixpanel** | Source of truth for product usage — pick one via `USAGE_PROVIDER` (defaults to PostHog); see [Configuration](#configuration) |
 | **Cloudflare D1** | Account metadata, health-snapshot history, and the text behind every retrieved context chunk |
 | **Cloudflare Vectorize** | Embeddings of ingested notes (call transcripts, tickets), searched per-account for the "Why?" flow |
 | **Workers AI** | Free default for both embeddings and answer generation — see [Configuration](#configuration) to swap in Anthropic or OpenRouter for better answers |
@@ -139,9 +139,10 @@ npx wrangler login
 
 ## Meeting transcripts & other context (the "Why?" flow)
 
-RAG needs something to retrieve. Three ways to get notes in:
+RAG needs something to retrieve. Six built-in connectors, plus a generic
+endpoint for anything else:
 
-**Fireflies** (recommended first connector — built for exactly this):
+**Fireflies** (recommended first meeting-transcript connector — built for exactly this):
 ```bash
 npx wrangler secret put FIREFLIES_API_KEY        # from Fireflies → Settings → Developer Settings
 npx wrangler secret put FIREFLIES_WEBHOOK_SECRET  # any string you choose
@@ -171,19 +172,45 @@ Requires a Google Cloud service account with Workspace domain-wide
 delegation, scoped to `meetings.space.readonly`. No webhook to configure —
 the nightly cron pulls the last 2 days of transcripts.
 
-**Anything else** (Intercom, Zendesk, HubSpot call notes, a manual export —
+**Intercom** (support conversations):
+```bash
+npx wrangler secret put INTERCOM_ACCESS_TOKEN   # private app / access token with read_conversations
+npx wrangler secret put INTERCOM_CLIENT_SECRET  # signs webhook deliveries
+```
+In your Intercom app's Webhooks settings, subscribe to
+`conversation.admin.closed` pointed at `https://<your-worker>/webhooks/intercom`.
+
+**Zendesk** (support tickets):
+```bash
+npx wrangler secret put ZENDESK_SUBDOMAIN       # "yourcompany" in yourcompany.zendesk.com
+npx wrangler secret put ZENDESK_EMAIL           # the agent/admin the API token belongs to
+npx wrangler secret put ZENDESK_API_TOKEN
+npx wrangler secret put ZENDESK_WEBHOOK_SECRET  # any string you choose
+```
+Create a Zendesk Trigger (Admin Center → Objects and rules → Triggers) on
+"Status changed to Solved" with action "Notify webhook", body
+`{ "ticketId": "{{ticket.id}}" }`, pointed at
+`https://<your-worker>/webhooks/zendesk?secret=<the same string>`.
+
+**HubSpot** (CRM notes — calls, meeting logs on a company/deal; nightly
+backfill, no webhook to configure):
+```bash
+npx wrangler secret put HUBSPOT_ACCESS_TOKEN   # private app with crm.objects.notes.read + crm.objects.companies.read
+```
+
+**Anything else** (a manual export, a different helpdesk, a spreadsheet —
 whatever): the generic ingestion endpoint takes plain text and metadata, so
 a Zapier/Make automation or a one-off script can feed it:
 ```bash
 npx wrangler secret put INGEST_API_KEY
 curl -X POST https://<your-worker>/ingest \
   -H "Authorization: Bearer $INGEST_API_KEY" -H "content-type: application/json" \
-  -d '{"accountId":"acct-001","source":"intercom","text":"...","occurredAt":"2026-09-01"}'
+  -d '{"accountId":"acct-001","source":"manual","text":"...","occurredAt":"2026-09-01"}'
 ```
 
-All three built-in connectors resolve which account a meeting belongs to by
-matching participant email domains against the `account_domains` table —
-populate it once per customer:
+All of the built-in connectors resolve which account a document belongs to
+by matching a participant/requester email domain (or a HubSpot company's
+domain) against the `account_domains` table — populate it once per customer:
 ```bash
 echo "INSERT INTO account_domains (domain, account_id) VALUES ('northwind.io', 'acct-001');" \
   | npx wrangler d1 execute bellwether --remote
@@ -193,34 +220,44 @@ domain matches.)
 
 ### How data stays fresh
 
-- **Usage numbers**: computed live from PostHog on every `@Bell how is X
-  doing?`, and additionally recomputed for *every* account each night (Cron
-  Trigger, `0 6 * * *` UTC — edit in `worker/wrangler.jsonc`) so trend
-  history accumulates even for accounts nobody asked about that day.
-- **Meeting transcripts**: Fireflies and Zoom arrive within minutes via
-  webhook, the moment a transcript finishes processing. Google Meet is
-  nightly-only (see above). The same nightly cron also re-checks the last 2
+- **Usage numbers**: computed live from PostHog or Mixpanel on every `@Bell
+  how is X doing?`, and additionally recomputed for *every* account each
+  night (Cron Trigger, `0 6 * * *` UTC — edit in `worker/wrangler.jsonc`) so
+  trend history accumulates even for accounts nobody asked about that day.
+- **Support conversations & meeting transcripts**: Fireflies, Zoom,
+  Intercom, and Zendesk all arrive within minutes via webhook, as soon as
+  the underlying event (call transcribed, ticket solved) happens. Google
+  Meet and HubSpot are nightly-only (see above — real-time would need
+  infrastructure outside Cloudflare for Meet, and a public-app webhook
+  subscription for HubSpot). The same nightly cron also re-checks the last 2
   days of Fireflies transcripts as a safety net for any webhook delivery
-  that failed — so the worst case is same-day, not "silently lost forever."
+  that failed — so the worst case for any source is same-day, not "silently
+  lost forever."
 
 ## Configuration
 
-Secrets (`wrangler secret put <NAME>`), all optional except the Slack/PostHog
-core:
+Secrets (`wrangler secret put <NAME>`), all optional except the Slack +
+usage-provider core:
 
 | Variable | Required | Description |
 |---|---|---|
 | `SLACK_BOT_TOKEN` | yes | Bot User OAuth Token (`xoxb-...`) |
 | `SLACK_SIGNING_SECRET` | yes | Verifies requests are from Slack |
-| `POSTHOG_API_KEY` | yes | Personal API key with query read access |
-| `POSTHOG_PROJECT_ID` | yes | Your PostHog project ID |
+| `USAGE_PROVIDER` | no | `posthog` (default) or `mixpanel` |
+| `POSTHOG_API_KEY` / `POSTHOG_PROJECT_ID` | if using PostHog | Personal API key with query read access, and project ID |
 | `POSTHOG_HOST` | no | Defaults to `https://eu.posthog.com` |
+| `MIXPANEL_PROJECT_ID` / `MIXPANEL_SERVICE_ACCOUNT_USERNAME` / `MIXPANEL_SERVICE_ACCOUNT_SECRET` | if using Mixpanel | A [service account](https://developer.mixpanel.com/reference/service-accounts) with query access |
+| `MIXPANEL_HOST` | no | Defaults to `https://mixpanel.com`; use `https://eu.mixpanel.com` for EU-residency projects |
+| `MIXPANEL_ACTIVE_EVENT_NAME` / `MIXPANEL_ACCOUNT_PROPERTY` | no | Defaults to `app_opened` / `account_id` — set to match your own instrumentation |
 | `ANTHROPIC_API_KEY` | no | If set, RAG answers use Claude Haiku instead of the free Workers AI model |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | no | If set (and Anthropic isn't), RAG answers route through OpenRouter — one key, choice of model, including genuinely free `:free` models |
 | `INGEST_API_KEY` | no | Enables `POST /ingest`; unset = disabled |
 | `FIREFLIES_API_KEY` / `FIREFLIES_WEBHOOK_SECRET` | no | Enables the Fireflies connector |
 | `ZOOM_WEBHOOK_SECRET_TOKEN` | no | Enables the Zoom connector |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` / `GOOGLE_WORKSPACE_IMPERSONATE_EMAIL` | no | Enables the Google Meet connector |
+| `INTERCOM_ACCESS_TOKEN` / `INTERCOM_CLIENT_SECRET` | no | Enables the Intercom connector |
+| `ZENDESK_SUBDOMAIN` / `ZENDESK_EMAIL` / `ZENDESK_API_TOKEN` / `ZENDESK_WEBHOOK_SECRET` | no | Enables the Zendesk connector |
+| `HUBSPOT_ACCESS_TOKEN` | no | Enables the HubSpot connector |
 
 ## Local development
 
@@ -245,10 +282,11 @@ worker/                    Cloudflare Worker (the whole app)
   src/index.ts              Routes + the nightly scheduled handler
   src/slack/                Slack HTTP verification, Web API client, Block Kit, event/interaction handlers
   src/baseline.ts            Usage health-tier computation
-  src/posthog.ts              PostHog HogQL client
+  src/usage.ts                 Picks PostHog or Mixpanel per USAGE_PROVIDER
+  src/posthog.ts, src/mixpanel.ts  The two usage-data clients
   src/db.ts                    D1 query helpers
   src/rag/                      Chunking, embeddings, ingestion, retrieval, answer generation
-  src/connectors/                 Fireflies, Zoom, Google Meet
+  src/connectors/                 Fireflies, Zoom, Google Meet, Intercom, Zendesk, HubSpot
   migrations/                       D1 schema
 data-seed/                 Python pipeline that synthesizes demo accounts + usage history into PostHog
 ```

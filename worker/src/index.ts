@@ -7,6 +7,9 @@ import { computeHealth } from "./baseline.js";
 import { ingestFirefliesTranscript, backfillRecentFireflies } from "./connectors/fireflies.js";
 import { handleZoomUrlValidation, verifyZoomSignature, ingestZoomTranscript } from "./connectors/zoom.js";
 import { backfillRecentGoogleMeet } from "./connectors/google-meet.js";
+import { verifyIntercomSignature, ingestIntercomConversation } from "./connectors/intercom.js";
+import { ingestZendeskTicket } from "./connectors/zendesk.js";
+import { backfillRecentHubSpot } from "./connectors/hubspot.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -152,6 +155,47 @@ async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext):
   return json({ ok: true });
 }
 
+async function handleIntercomWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (!env.INTERCOM_ACCESS_TOKEN || !env.INTERCOM_CLIENT_SECRET) {
+    return json({ error: "Intercom connector is disabled: set INTERCOM_ACCESS_TOKEN and INTERCOM_CLIENT_SECRET." }, 501);
+  }
+
+  const rawBody = await req.text();
+  const ok = await verifyIntercomSignature(env.INTERCOM_CLIENT_SECRET, req.headers.get("x-hub-signature"), rawBody);
+  if (!ok) return new Response("invalid signature", { status: 401 });
+
+  const payload = JSON.parse(rawBody) as { topic?: string; data?: { item?: { id?: string } } };
+  const conversationId = payload.data?.item?.id;
+  if (payload.topic?.startsWith("conversation.") && conversationId) {
+    ctx.waitUntil(
+      ingestIntercomConversation(env, conversationId).catch((err) =>
+        console.error(`intercom webhook ingest failed for ${conversationId}`, err)
+      )
+    );
+  }
+  return json({ ok: true });
+}
+
+async function handleZendeskWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (!env.ZENDESK_WEBHOOK_SECRET) {
+    return json({ error: "Zendesk connector is disabled: set ZENDESK_WEBHOOK_SECRET." }, 501);
+  }
+
+  const url = new URL(req.url);
+  const providedSecret = req.headers.get("x-webhook-secret") ?? url.searchParams.get("secret");
+  if (providedSecret !== env.ZENDESK_WEBHOOK_SECRET) {
+    return json({ error: "unauthorized" }, 401);
+  }
+
+  const body = await req.json<{ ticketId?: string | number }>();
+  if (!body.ticketId) return json({ error: "missing ticketId" }, 400);
+
+  ctx.waitUntil(
+    ingestZendeskTicket(env, body.ticketId).catch((err) => console.error(`zendesk webhook ingest failed for ${body.ticketId}`, err))
+  );
+  return json({ ok: true });
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -170,6 +214,12 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/webhooks/zoom") {
       return handleZoomWebhook(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/webhooks/intercom") {
+      return handleIntercomWebhook(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/webhooks/zendesk") {
+      return handleZendeskWebhook(req, env, ctx);
     }
     if (req.method === "GET" && url.pathname === "/health") {
       return json({ ok: true });
@@ -204,6 +254,12 @@ export default {
       await backfillRecentGoogleMeet(env);
     } catch (err) {
       console.error("google meet backfill failed", err);
+    }
+
+    try {
+      await backfillRecentHubSpot(env);
+    } catch (err) {
+      console.error("hubspot backfill failed", err);
     }
   },
 } satisfies ExportedHandler<Env>;

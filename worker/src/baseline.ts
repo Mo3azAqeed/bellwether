@@ -1,6 +1,7 @@
 import type { Env } from "./env.js";
 import type { DbAccount } from "./db.js";
-import { getDailyActiveSeats, type DailyActivePoint } from "./posthog.js";
+import type { DailyActivePoint } from "./posthog.js";
+import { getDailyActiveSeats } from "./usage.js";
 
 export interface HealthSnapshot {
   avgActiveSeats: number; // avg distinct daily active users over the current window
