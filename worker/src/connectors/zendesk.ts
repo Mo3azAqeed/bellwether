@@ -15,6 +15,7 @@
 import type { Env } from "../env.js";
 import { ingestDocument } from "../rag/ingest.js";
 import { resolveAccountId } from "./resolve-account.js";
+import { getSettings } from "../settings.js";
 
 interface ZendeskTicketResponse {
   ticket: { id: number; subject: string; created_at: string; requester_id: number };
@@ -25,22 +26,29 @@ interface ZendeskCommentsResponse {
   comments: { body: string; author_id: number; public: boolean }[];
 }
 
-function authHeader(env: Env): string {
-  return `Basic ${btoa(`${env.ZENDESK_EMAIL}/token:${env.ZENDESK_API_TOKEN}`)}`;
+interface ZendeskCreds {
+  subdomain: string;
+  email: string;
+  apiToken: string;
 }
 
-async function zendeskGet<T>(env: Env, path: string): Promise<T> {
-  const resp = await fetch(`https://${env.ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/${path}`, {
-    headers: { Authorization: authHeader(env), Accept: "application/json" },
+async function zendeskGet<T>(creds: ZendeskCreds, path: string): Promise<T> {
+  const resp = await fetch(`https://${creds.subdomain}.zendesk.com/api/v2/${path}`, {
+    headers: {
+      Authorization: `Basic ${btoa(`${creds.email}/token:${creds.apiToken}`)}`,
+      Accept: "application/json",
+    },
   });
   if (!resp.ok) throw new Error(`Zendesk API failed: HTTP ${resp.status} — ${(await resp.text()).slice(0, 300)}`);
   return resp.json();
 }
 
 export async function ingestZendeskTicket(env: Env, ticketId: string | number): Promise<{ skipped: string } | { chunksStored: number }> {
-  if (!env.ZENDESK_SUBDOMAIN || !env.ZENDESK_EMAIL || !env.ZENDESK_API_TOKEN) {
+  const settings = await getSettings(env, ["ZENDESK_SUBDOMAIN", "ZENDESK_EMAIL", "ZENDESK_API_TOKEN"]);
+  if (!settings.ZENDESK_SUBDOMAIN || !settings.ZENDESK_EMAIL || !settings.ZENDESK_API_TOKEN) {
     throw new Error("ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, and ZENDESK_API_TOKEN are required");
   }
+  const creds: ZendeskCreds = { subdomain: settings.ZENDESK_SUBDOMAIN, email: settings.ZENDESK_EMAIL, apiToken: settings.ZENDESK_API_TOKEN };
 
   const existing = await env.DB.prepare(`SELECT 1 FROM context_chunks WHERE source = 'zendesk' AND source_ref = ?1 LIMIT 1`)
     .bind(String(ticketId))
@@ -48,8 +56,8 @@ export async function ingestZendeskTicket(env: Env, ticketId: string | number): 
   if (existing) return { skipped: "already ingested" };
 
   const [ticketData, commentsData] = await Promise.all([
-    zendeskGet<ZendeskTicketResponse>(env, `tickets/${ticketId}.json?include=users`),
-    zendeskGet<ZendeskCommentsResponse>(env, `tickets/${ticketId}/comments.json`),
+    zendeskGet<ZendeskTicketResponse>(creds, `tickets/${ticketId}.json?include=users`),
+    zendeskGet<ZendeskCommentsResponse>(creds, `tickets/${ticketId}/comments.json`),
   ]);
 
   const requester = ticketData.users?.find((u) => u.id === ticketData.ticket.requester_id);

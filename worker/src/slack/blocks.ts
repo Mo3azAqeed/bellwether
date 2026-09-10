@@ -87,6 +87,24 @@ export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): 
   ];
 }
 
+const TIER_RANK: Record<HealthSnapshot["tier"], number> = { stable: 0, watch: 1, at_risk: 2 };
+
+/** Proactive tier-change notification — an account card with a header
+ * explaining why it showed up unprompted (nobody asked `@Bell` about it;
+ * the nightly sweep noticed the tier moved). Wording says "improved" vs
+ * "dropped" rather than always "changed" so a recovery doesn't read as bad
+ * news. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildAlertBlocks(account: DbAccount, previousTier: HealthSnapshot["tier"], health: HealthSnapshot): any[] {
+  const direction = TIER_RANK[health.tier] > TIER_RANK[previousTier] ? "dropped" : "improved";
+  const headerText =
+    direction === "dropped"
+      ? `⚠️ *${account.name}*'s health tier just ${direction} — ${TIER_LABEL[previousTier]} → ${TIER_LABEL[health.tier]}`
+      : `✅ *${account.name}*'s health tier just ${direction} — ${TIER_LABEL[previousTier]} → ${TIER_LABEL[health.tier]}`;
+
+  return [{ type: "section", text: { type: "mrkdwn", text: headerText } }, ...buildAccountBlocks(account, health)];
+}
+
 /** Renders a grounded answer plus the source chunks it was built from, so
  * the reader can check the citation rather than trust the model blindly. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

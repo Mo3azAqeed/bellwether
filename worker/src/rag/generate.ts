@@ -1,5 +1,6 @@
 import type { Env } from "../env.js";
 import type { RetrievedChunk } from "./retrieve.js";
+import { getSetting } from "../settings.js";
 
 /** Free, runs on Workers AI — the default so a fresh deploy costs nothing
  * beyond the Workers Paid plan Vectorize itself requires. Swap for a
@@ -63,11 +64,11 @@ async function generateWithAnthropic(apiKey: string, prompt: string): Promise<st
   return json.content.find((b) => b.type === "text")?.text ?? "";
 }
 
-async function generateWithOpenRouter(env: Env, prompt: string): Promise<string> {
+async function generateWithOpenRouter(apiKey: string, model: string | undefined, prompt: string): Promise<string> {
   const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
       // Optional per OpenRouter's docs (attributes usage to the app in
       // their dashboard) — harmless to omit, cheap to include.
@@ -75,7 +76,7 @@ async function generateWithOpenRouter(env: Env, prompt: string): Promise<string>
       "X-Title": "Bellwether",
     },
     body: JSON.stringify({
-      model: env.OPENROUTER_MODEL || DEFAULT_OPENROUTER_MODEL,
+      model: model || DEFAULT_OPENROUTER_MODEL,
       max_tokens: 300,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -94,7 +95,12 @@ export async function generateAnswer(
   chunks: RetrievedChunk[]
 ): Promise<string> {
   const prompt = buildPrompt(accountName, question, chunks);
-  if (env.ANTHROPIC_API_KEY) return generateWithAnthropic(env.ANTHROPIC_API_KEY, prompt);
-  if (env.OPENROUTER_API_KEY) return generateWithOpenRouter(env, prompt);
+  const [anthropicKey, openRouterKey, openRouterModel] = await Promise.all([
+    getSetting(env, "ANTHROPIC_API_KEY"),
+    getSetting(env, "OPENROUTER_API_KEY"),
+    getSetting(env, "OPENROUTER_MODEL"),
+  ]);
+  if (anthropicKey) return generateWithAnthropic(anthropicKey, prompt);
+  if (openRouterKey) return generateWithOpenRouter(openRouterKey, openRouterModel, prompt);
   return generateWithWorkersAI(env, prompt);
 }

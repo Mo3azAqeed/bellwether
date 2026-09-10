@@ -2,14 +2,18 @@ import type { Env } from "./env.js";
 import { verifySlackRequest } from "./slack/verify.js";
 import { handleAppMention, handleBlockAction, handleViewSubmission } from "./slack/handlers.js";
 import { ingestDocument, type IngestInput } from "./rag/ingest.js";
-import { allDbAccounts, recordHealthSnapshot } from "./db.js";
-import { computeHealth } from "./baseline.js";
+import { allDbAccounts, recordHealthSnapshot, getLatestSnapshot } from "./db.js";
+import { computeHealth, type HealthSnapshot } from "./baseline.js";
 import { ingestFirefliesTranscript, backfillRecentFireflies } from "./connectors/fireflies.js";
 import { handleZoomUrlValidation, verifyZoomSignature, ingestZoomTranscript } from "./connectors/zoom.js";
 import { backfillRecentGoogleMeet } from "./connectors/google-meet.js";
 import { verifyIntercomSignature, ingestIntercomConversation } from "./connectors/intercom.js";
 import { ingestZendeskTicket } from "./connectors/zendesk.js";
 import { backfillRecentHubSpot } from "./connectors/hubspot.js";
+import { getSetting } from "./settings.js";
+import { maybeAlert } from "./alerts.js";
+import { claimSyncIfDue } from "./sync-schedule.js";
+import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -71,11 +75,12 @@ async function handleSlackInteractions(req: Request, env: Env, ctx: ExecutionCon
 }
 
 async function handleIngest(req: Request, env: Env): Promise<Response> {
-  if (!env.INGEST_API_KEY) {
+  const ingestKey = await getSetting(env, "INGEST_API_KEY");
+  if (!ingestKey) {
     return json({ error: "Ingestion is disabled: set INGEST_API_KEY to enable POST /ingest." }, 501);
   }
   const auth = req.headers.get("authorization");
-  if (auth !== `Bearer ${env.INGEST_API_KEY}`) {
+  if (auth !== `Bearer ${ingestKey}`) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -94,7 +99,8 @@ async function handleIngest(req: Request, env: Env): Promise<Response> {
 }
 
 async function handleFirefliesWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (!env.FIREFLIES_API_KEY || !env.FIREFLIES_WEBHOOK_SECRET) {
+  const [apiKey, webhookSecret] = await Promise.all([getSetting(env, "FIREFLIES_API_KEY"), getSetting(env, "FIREFLIES_WEBHOOK_SECRET")]);
+  if (!apiKey || !webhookSecret) {
     return json({ error: "Fireflies connector is disabled: set FIREFLIES_API_KEY and FIREFLIES_WEBHOOK_SECRET." }, 501);
   }
 
@@ -104,7 +110,7 @@ async function handleFirefliesWebhook(req: Request, env: Env, ctx: ExecutionCont
   // header is also accepted in case that changes.
   const url = new URL(req.url);
   const providedSecret = req.headers.get("x-webhook-secret") ?? url.searchParams.get("secret");
-  if (providedSecret !== env.FIREFLIES_WEBHOOK_SECRET) {
+  if (providedSecret !== webhookSecret) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -125,7 +131,8 @@ async function handleFirefliesWebhook(req: Request, env: Env, ctx: ExecutionCont
 }
 
 async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (!env.ZOOM_WEBHOOK_SECRET_TOKEN) {
+  const secretToken = await getSetting(env, "ZOOM_WEBHOOK_SECRET_TOKEN");
+  if (!secretToken) {
     return json({ error: "Zoom connector is disabled: set ZOOM_WEBHOOK_SECRET_TOKEN." }, 501);
   }
 
@@ -137,11 +144,11 @@ async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext):
   // itself signed the way real events are.
   if (parsed.event === "endpoint.url_validation") {
     const plainToken = (parsed.payload as { plainToken: string }).plainToken;
-    return json(await handleZoomUrlValidation(env.ZOOM_WEBHOOK_SECRET_TOKEN, plainToken));
+    return json(await handleZoomUrlValidation(secretToken, plainToken));
   }
 
   const ok = await verifyZoomSignature(
-    env.ZOOM_WEBHOOK_SECRET_TOKEN,
+    secretToken,
     req.headers.get("x-zm-request-timestamp"),
     req.headers.get("x-zm-signature"),
     rawBody
@@ -156,12 +163,13 @@ async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext):
 }
 
 async function handleIntercomWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (!env.INTERCOM_ACCESS_TOKEN || !env.INTERCOM_CLIENT_SECRET) {
+  const [accessToken, clientSecret] = await Promise.all([getSetting(env, "INTERCOM_ACCESS_TOKEN"), getSetting(env, "INTERCOM_CLIENT_SECRET")]);
+  if (!accessToken || !clientSecret) {
     return json({ error: "Intercom connector is disabled: set INTERCOM_ACCESS_TOKEN and INTERCOM_CLIENT_SECRET." }, 501);
   }
 
   const rawBody = await req.text();
-  const ok = await verifyIntercomSignature(env.INTERCOM_CLIENT_SECRET, req.headers.get("x-hub-signature"), rawBody);
+  const ok = await verifyIntercomSignature(clientSecret, req.headers.get("x-hub-signature"), rawBody);
   if (!ok) return new Response("invalid signature", { status: 401 });
 
   const payload = JSON.parse(rawBody) as { topic?: string; data?: { item?: { id?: string } } };
@@ -177,13 +185,14 @@ async function handleIntercomWebhook(req: Request, env: Env, ctx: ExecutionConte
 }
 
 async function handleZendeskWebhook(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (!env.ZENDESK_WEBHOOK_SECRET) {
+  const webhookSecret = await getSetting(env, "ZENDESK_WEBHOOK_SECRET");
+  if (!webhookSecret) {
     return json({ error: "Zendesk connector is disabled: set ZENDESK_WEBHOOK_SECRET." }, 501);
   }
 
   const url = new URL(req.url);
   const providedSecret = req.headers.get("x-webhook-secret") ?? url.searchParams.get("secret");
-  if (providedSecret !== env.ZENDESK_WEBHOOK_SECRET) {
+  if (providedSecret !== webhookSecret) {
     return json({ error: "unauthorized" }, 401);
   }
 
@@ -221,6 +230,24 @@ export default {
     if (req.method === "POST" && url.pathname === "/webhooks/zendesk") {
       return handleZendeskWebhook(req, env, ctx);
     }
+    if (req.method === "GET" && url.pathname === "/setup") {
+      return handleSetupPage(env);
+    }
+    if (req.method === "GET" && url.pathname === "/setup/api/status") {
+      return handleSetupStatus(req, env);
+    }
+    if (req.method === "POST" && url.pathname === "/setup/api/test-and-save") {
+      return handleTestAndSave(req, env);
+    }
+    if (req.method === "POST" && url.pathname === "/setup/api/skip") {
+      return handleSkip(req, env);
+    }
+    if (req.method === "POST" && url.pathname === "/setup/api/frequency") {
+      return handleSetFrequency(req, env);
+    }
+    if (req.method === "POST" && url.pathname === "/setup/api/alerts-channel") {
+      return handleSetAlertsChannel(req, env);
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       return json({ ok: true });
     }
@@ -228,17 +255,25 @@ export default {
     return new Response("not found", { status: 404 });
   },
 
-  /** Nightly (see wrangler.jsonc `triggers.crons`): recomputes every
-   * account's usage tier so history accumulates even for accounts nobody
-   * asked `@Bell` about that day, and backfills any Fireflies transcripts
-   * whose webhook delivery never arrived — the safety net under the
-   * real-time webhook path, not the primary path itself. */
+  /** Fires every 4 hours (see wrangler.jsonc `triggers.crons`) but only
+   * does the actual sync work when it's due per the user's chosen
+   * frequency (src/sync-schedule.ts, set via the /setup UI) — so the trigger
+   * itself stays fixed at the finest interval offered, and "sync every 24h"
+   * just means most firings are a no-op D1 read. When due: recomputes every
+   * account's usage tier (alerting on any tier change) so history
+   * accumulates even for accounts nobody asked `@Bell` about, and backfills
+   * anything a connector's webhook delivery missed. */
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const due = await claimSyncIfDue(env);
+    if (!due) return;
+
     const accounts = await allDbAccounts(env.DB);
     for (const account of accounts) {
       try {
+        const previous = await getLatestSnapshot(env.DB, account.account_id);
         const health = await computeHealth(env, account);
         await recordHealthSnapshot(env.DB, account.account_id, health.avgActiveSeats, health.baselineDeltaPct, health.tier);
+        await maybeAlert(env, account, previous?.tier as HealthSnapshot["tier"] | undefined, health);
       } catch (err) {
         console.error(`nightly sweep failed for ${account.account_id}`, err);
       }

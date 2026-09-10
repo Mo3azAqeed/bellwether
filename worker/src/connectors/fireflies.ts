@@ -19,6 +19,7 @@
 import type { Env } from "../env.js";
 import { ingestDocument } from "../rag/ingest.js";
 import { resolveAccountId } from "./resolve-account.js";
+import { getSetting } from "../settings.js";
 
 const GRAPHQL_ENDPOINT = "https://api.fireflies.ai/graphql";
 
@@ -90,7 +91,8 @@ function normalizeDate(date: string | number): Date {
 }
 
 export async function ingestFirefliesTranscript(env: Env, transcriptId: string): Promise<{ skipped: string } | { chunksStored: number }> {
-  if (!env.FIREFLIES_API_KEY) throw new Error("FIREFLIES_API_KEY is not set");
+  const apiKey = await getSetting(env, "FIREFLIES_API_KEY");
+  if (!apiKey) throw new Error("FIREFLIES_API_KEY is not set");
 
   const existing = await env.DB.prepare(
     `SELECT 1 FROM context_chunks WHERE source = 'fireflies' AND source_ref = ?1 LIMIT 1`
@@ -99,7 +101,7 @@ export async function ingestFirefliesTranscript(env: Env, transcriptId: string):
     .first();
   if (existing) return { skipped: "already ingested" };
 
-  const transcript = await fetchTranscript(env.FIREFLIES_API_KEY, transcriptId);
+  const transcript = await fetchTranscript(apiKey, transcriptId);
   const accountId = await resolveAccountId(env, { emails: transcript.participants, title: transcript.title });
   if (!accountId) return { skipped: `could not resolve an account for "${transcript.title}"` };
 
@@ -119,10 +121,11 @@ export async function ingestFirefliesTranscript(env: Env, transcriptId: string):
  * never arrived. Looks back 2 days (not just 1) so a single missed night
  * doesn't lose anything permanently. */
 export async function backfillRecentFireflies(env: Env): Promise<void> {
-  if (!env.FIREFLIES_API_KEY) return;
+  const apiKey = await getSetting(env, "FIREFLIES_API_KEY");
+  if (!apiKey) return;
 
   const sinceMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
-  const ids = await listRecentTranscriptIds(env.FIREFLIES_API_KEY, sinceMs);
+  const ids = await listRecentTranscriptIds(apiKey, sinceMs);
 
   for (const id of ids) {
     try {

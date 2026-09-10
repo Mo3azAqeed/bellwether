@@ -14,6 +14,7 @@
 import type { Env } from "../env.js";
 import { ingestDocument } from "../rag/ingest.js";
 import { resolveAccountId } from "./resolve-account.js";
+import { getSetting } from "../settings.js";
 
 interface IntercomConversation {
   id: string;
@@ -47,7 +48,8 @@ export async function verifyIntercomSignature(clientSecret: string, signatureHea
 }
 
 export async function ingestIntercomConversation(env: Env, conversationId: string): Promise<{ skipped: string } | { chunksStored: number }> {
-  if (!env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN is not set");
+  const accessToken = await getSetting(env, "INTERCOM_ACCESS_TOKEN");
+  if (!accessToken) throw new Error("INTERCOM_ACCESS_TOKEN is not set");
 
   const existing = await env.DB.prepare(`SELECT 1 FROM context_chunks WHERE source = 'intercom' AND source_ref = ?1 LIMIT 1`)
     .bind(conversationId)
@@ -56,7 +58,7 @@ export async function ingestIntercomConversation(env: Env, conversationId: strin
 
   const resp = await fetch(`https://api.intercom.io/conversations/${conversationId}`, {
     headers: {
-      Authorization: `Bearer ${env.INTERCOM_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${accessToken}`,
       "Intercom-Version": "2.11",
       Accept: "application/json",
     },

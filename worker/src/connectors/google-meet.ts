@@ -28,6 +28,7 @@
 import type { Env } from "../env.js";
 import { ingestDocument } from "../rag/ingest.js";
 import { resolveAccountId } from "./resolve-account.js";
+import { getSettings } from "../settings.js";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const MEET_API_BASE = "https://meet.googleapis.com/v2";
@@ -44,28 +45,33 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
 }
 
-async function getAccessToken(env: Env): Promise<string> {
-  if (!env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || !env.GOOGLE_WORKSPACE_IMPERSONATE_EMAIL) {
-    throw new Error("GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and GOOGLE_WORKSPACE_IMPERSONATE_EMAIL are required");
-  }
+export interface GoogleServiceAccountCreds {
+  email: string;
+  privateKey: string;
+  impersonateEmail: string;
+}
 
+/** Does the actual JWT-bearer exchange from raw credentials — split out
+ * from getAccessToken() so the setup wizard's "test connection" step can
+ * validate credentials the user just typed, before they're saved anywhere. */
+export async function exchangeServiceAccountToken(creds: GoogleServiceAccountCreds): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claims = base64url(
     JSON.stringify({
-      iss: env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      iss: creds.email,
       scope: SCOPE,
       aud: TOKEN_URL,
       iat: now,
       exp: now + 3600,
-      sub: env.GOOGLE_WORKSPACE_IMPERSONATE_EMAIL,
+      sub: creds.impersonateEmail,
     })
   );
   const signingInput = `${header}.${claims}`;
 
   const key = await crypto.subtle.importKey(
     "pkcs8",
-    pemToArrayBuffer(env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY),
+    pemToArrayBuffer(creds.privateKey),
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
     false,
     ["sign"]
@@ -84,6 +90,18 @@ async function getAccessToken(env: Env): Promise<string> {
   if (!resp.ok) throw new Error(`Google OAuth token exchange failed: HTTP ${resp.status} — ${(await resp.text()).slice(0, 300)}`);
   const json = await resp.json<{ access_token: string }>();
   return json.access_token;
+}
+
+export async function getAccessToken(env: Env): Promise<string> {
+  const settings = await getSettings(env, ["GOOGLE_SERVICE_ACCOUNT_EMAIL", "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY", "GOOGLE_WORKSPACE_IMPERSONATE_EMAIL"]);
+  if (!settings.GOOGLE_SERVICE_ACCOUNT_EMAIL || !settings.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || !settings.GOOGLE_WORKSPACE_IMPERSONATE_EMAIL) {
+    throw new Error("GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, and GOOGLE_WORKSPACE_IMPERSONATE_EMAIL are required");
+  }
+  return exchangeServiceAccountToken({
+    email: settings.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    privateKey: settings.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
+    impersonateEmail: settings.GOOGLE_WORKSPACE_IMPERSONATE_EMAIL,
+  });
 }
 
 interface ConferenceRecord {
@@ -141,7 +159,8 @@ async function fetchTranscriptText(accessToken: string, conferenceRecordName: st
 }
 
 export async function backfillRecentGoogleMeet(env: Env): Promise<void> {
-  if (!env.GOOGLE_SERVICE_ACCOUNT_EMAIL) return; // connector not configured
+  const configured = await getSettings(env, ["GOOGLE_SERVICE_ACCOUNT_EMAIL"]);
+  if (!configured.GOOGLE_SERVICE_ACCOUNT_EMAIL) return; // connector not configured
 
   const accessToken = await getAccessToken(env);
   const sinceISO = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();

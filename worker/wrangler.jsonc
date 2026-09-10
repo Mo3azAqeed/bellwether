@@ -5,11 +5,13 @@
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // Nightly health sweep: recomputes every account's tier so `@Bell` answers
-  // instantly from a cached snapshot instead of hitting PostHog live on every
-  // mention. Adjust the hour to your timezone (this is UTC).
+  // Fires every 4 hours — the finest sync interval the /setup UI offers.
+  // Actual work only runs when it's due per the chosen frequency (default
+  // 24h; see src/sync-schedule.ts), so this being fixed doesn't force
+  // everyone onto a 4-hourly sync. Change this only if you want a finer
+  // option than 4h available in the UI too.
   "triggers": {
-    "crons": ["0 6 * * *"]
+    "crons": ["0 */4 * * *"]
   },
 
   "d1_databases": [

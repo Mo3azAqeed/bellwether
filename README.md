@@ -39,14 +39,25 @@ Sources:
 | **Cloudflare D1** | Account metadata, health-snapshot history, and the text behind every retrieved context chunk |
 | **Cloudflare Vectorize** | Embeddings of ingested notes (call transcripts, tickets), searched per-account for the "Why?" flow |
 | **Workers AI** | Free default for both embeddings and answer generation — see [Configuration](#configuration) to swap in Anthropic or OpenRouter for better answers |
-| **Cloudflare Cron Triggers** | Nightly: recompute every account's health tier, and backfill any meeting transcripts a webhook missed |
+| **Cloudflare Cron Triggers** | On the interval you pick in the setup wizard (4h/8h/12h/24h): recompute every account's health tier, alert Slack on any tier change, and backfill anything a connector's webhook missed |
 | **The Worker** (`worker/`) | Everything above, tied together, answering Slack over HTTP (no long-lived process, no Socket Mode) |
+| **The setup wizard** (`/setup`) | A page the Worker serves itself — connect each integration one at a time, test the credential live, and it's saved straight to your D1 database. See [Setup wizard](#setup-wizard) |
 
 `@Bell how is X doing?` computes X's usage live from PostHog against its own
 10-day-vs-49-day baseline. `@Bell why is X declining?` (or the **Why?**
 button) retrieves the most relevant ingested notes for X and has a model
 answer *only* from them, citing sources — it says so plainly rather than
-guessing if nothing's been ingested yet.
+guessing if nothing's been ingested yet. Bellwether also doesn't wait to be
+asked: set an alerts channel in the setup wizard and it posts there
+unprompted whenever an account's tier changes —
+
+```
+⚠️ Northwind's health tier just dropped — Stable → Watch
+
+🟡 Northwind
+Slowing down. Down 24% against its own baseline over the last few weeks.
+...
+```
 
 See [`data-seed/schema.md`](data-seed/schema.md) for the PostHog event schema
 this expects, and [`worker/migrations/`](worker/migrations/) for the D1
@@ -110,13 +121,19 @@ npx wrangler login
    npx wrangler d1 execute bellwether --remote --file=seed.sql
    ```
 
-4. **Set secrets** (these never go in `wrangler.jsonc` or get committed):
+4. **Set the secrets that have to exist before anything else can work**
+   (these never go in `wrangler.jsonc` or get committed):
    ```bash
    npx wrangler secret put SLACK_BOT_TOKEN
    npx wrangler secret put SLACK_SIGNING_SECRET
-   npx wrangler secret put POSTHOG_API_KEY
-   npx wrangler secret put POSTHOG_PROJECT_ID
+   npx wrangler secret put SETUP_ADMIN_TOKEN   # pick any strong random string — gates the /setup wizard
    ```
+   PostHog/Mixpanel and every other connector's credentials do **not** need
+   `wrangler secret put` — you'll add those through the setup wizard in step
+   7, which saves them straight to your D1 database (no redeploy needed).
+   Use the CLI instead only if you'd rather not put a credential in the
+   database at all; see [Configuration](#configuration) for the full list
+   of env var names either path uses.
 
 5. **Deploy:**
    ```bash
@@ -135,12 +152,50 @@ npx wrangler login
      `SLACK_SIGNING_SECRET`.
    - Invite `@Bell` to a channel (`/invite @Bell`).
 
-7. Ask `@Bell how is <account name> doing?` in Slack.
+7. **Open the setup wizard** at `https://<your-worker>/setup`, enter the
+   `SETUP_ADMIN_TOKEN` you set in step 4, and connect PostHog (or Mixpanel)
+   plus whichever context sources you want — see
+   [Setup wizard](#setup-wizard) below.
+
+8. Ask `@Bell how is <account name> doing?` in Slack.
+
+## Setup wizard
+
+`https://<your-worker>/setup` is a page the Worker serves itself — no
+separate service, no frontend build, just static HTML/JS this repo ships.
+Enter your `SETUP_ADMIN_TOKEN` once (kept in the browser's `localStorage`
+after that) and you get a grid of every integration, one screen per
+connector:
+
+1. Pick one (PostHog, Fireflies, HubSpot, whatever).
+2. Short instructions for where to get the credential, and a form for it.
+3. **Test & Connect** makes one real request to that service to confirm the
+   credential actually works, *then* saves it — nothing gets stored on a
+   failed test. Where a live test isn't possible (Zoom's webhook secret only
+   verifies inbound requests, for instance) it just saves.
+4. **Skip for now** if you're not ready to wire that one up yet — it stays
+   visibly "skipped" on the dashboard rather than looking broken.
+
+Everything saved this way goes into your own D1 database (the `settings`
+table), not a Workers secret — that's what makes "paste it, watch it turn
+green" possible without a redeploy. If you'd rather a credential never touch
+the database at all, `wrangler secret put <NAME>` for that variable still
+works exactly the same; D1 is only checked first, with the Workers
+secret/var as a fallback (src/settings.ts). One credential is deliberately
+*not* editable from here: `SETUP_ADMIN_TOKEN` itself, which only ever comes
+from `wrangler secret put`, set before your first deploy — otherwise the
+page that gates access to everything else could grant access to itself.
+
+The wizard is also where you set the **alerts channel** (a Slack channel ID
+Bellwether posts to whenever an account's tier changes) and the **sync
+frequency** (see [How data stays fresh](#how-data-stays-fresh)) — both save
+instantly, no redeploy.
 
 ## Meeting transcripts & other context (the "Why?" flow)
 
-RAG needs something to retrieve. Six built-in connectors, plus a generic
-endpoint for anything else:
+RAG needs something to retrieve. Six built-in connectors (configure them
+through the [setup wizard](#setup-wizard) above, or by hand below), plus a
+generic endpoint for anything else:
 
 **Fireflies** (recommended first meeting-transcript connector — built for exactly this):
 ```bash
@@ -221,28 +276,42 @@ domain matches.)
 ### How data stays fresh
 
 - **Usage numbers**: computed live from PostHog or Mixpanel on every `@Bell
-  how is X doing?`, and additionally recomputed for *every* account each
-  night (Cron Trigger, `0 6 * * *` UTC — edit in `worker/wrangler.jsonc`) so
-  trend history accumulates even for accounts nobody asked about that day.
+  how is X doing?` — that always runs fresh, regardless of anything below.
+  Additionally recomputed for *every* account on a schedule you pick in the
+  setup wizard (4h / 8h / 12h / 24h, default 24h) so trend history
+  accumulates for accounts nobody asked about, and so tier-change alerts
+  (below) actually fire. The underlying Cron Trigger fires every 4 hours no
+  matter what (`worker/wrangler.jsonc`); the chosen frequency decides
+  whether each firing actually does the work or is a cheap no-op.
 - **Support conversations & meeting transcripts**: Fireflies, Zoom,
   Intercom, and Zendesk all arrive within minutes via webhook, as soon as
-  the underlying event (call transcribed, ticket solved) happens. Google
-  Meet and HubSpot are nightly-only (see above — real-time would need
+  the underlying event (call transcribed, ticket solved) happens — that part
+  isn't on the frequency schedule above. Google Meet and HubSpot are
+  backfill-only (same schedule as usage numbers above — real-time would need
   infrastructure outside Cloudflare for Meet, and a public-app webhook
-  subscription for HubSpot). The same nightly cron also re-checks the last 2
-  days of Fireflies transcripts as a safety net for any webhook delivery
-  that failed — so the worst case for any source is same-day, not "silently
-  lost forever."
+  subscription for HubSpot). Each due run also re-checks the last 2 days of
+  Fireflies transcripts as a safety net for any webhook delivery that
+  failed — so the worst case for any source is one sync interval, not
+  "silently lost forever."
+- **Alerts**: if you set an alerts channel in the wizard, every due sync run
+  compares each account's new tier against its previous one and posts to
+  Slack on any change (up or down) — see the example near the top of this
+  README.
 
 ## Configuration
 
-Secrets (`wrangler secret put <NAME>`), all optional except the Slack +
-usage-provider core:
+Every row below can be set either through the [setup wizard](#setup-wizard)
+(saved to D1) or as a Workers secret/var (`wrangler secret put <NAME>`, or
+a plain var in `wrangler.jsonc` for non-secret ones) — D1 is checked first,
+so the wizard always wins if both are set (`src/settings.ts`). Only three
+are required before your first deploy, because they're needed to reach or
+trust the wizard at all:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SLACK_BOT_TOKEN` | yes | Bot User OAuth Token (`xoxb-...`) |
-| `SLACK_SIGNING_SECRET` | yes | Verifies requests are from Slack |
+| `SLACK_BOT_TOKEN` | yes, secret only | Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_SIGNING_SECRET` | yes, secret only | Verifies requests are from Slack |
+| `SETUP_ADMIN_TOKEN` | yes, secret only | Gates `/setup` — never settable through the UI itself |
 | `USAGE_PROVIDER` | no | `posthog` (default) or `mixpanel` |
 | `POSTHOG_API_KEY` / `POSTHOG_PROJECT_ID` | if using PostHog | Personal API key with query read access, and project ID |
 | `POSTHOG_HOST` | no | Defaults to `https://eu.posthog.com` |
@@ -258,6 +327,8 @@ usage-provider core:
 | `INTERCOM_ACCESS_TOKEN` / `INTERCOM_CLIENT_SECRET` | no | Enables the Intercom connector |
 | `ZENDESK_SUBDOMAIN` / `ZENDESK_EMAIL` / `ZENDESK_API_TOKEN` / `ZENDESK_WEBHOOK_SECRET` | no | Enables the Zendesk connector |
 | `HUBSPOT_ACCESS_TOKEN` | no | Enables the HubSpot connector |
+| `SLACK_ALERTS_CHANNEL` | no | Slack channel ID alerts post to on a tier change; unset = alerting off |
+| `SYNC_FREQUENCY_HOURS` | no | `4`, `8`, `12`, or `24` (default) — see [How data stays fresh](#how-data-stays-fresh) |
 
 ## Local development
 
@@ -285,9 +356,13 @@ worker/                    Cloudflare Worker (the whole app)
   src/usage.ts                 Picks PostHog or Mixpanel per USAGE_PROVIDER
   src/posthog.ts, src/mixpanel.ts  The two usage-data clients
   src/db.ts                    D1 query helpers
-  src/rag/                      Chunking, embeddings, ingestion, retrieval, answer generation
-  src/connectors/                 Fireflies, Zoom, Google Meet, Intercom, Zendesk, HubSpot
-  migrations/                       D1 schema
+  src/settings.ts               D1-first, env-fallback credential/config reads
+  src/alerts.ts                  Tier-change Slack alerts
+  src/sync-schedule.ts             Frequency gate for the scheduled handler
+  src/setup/                        The /setup wizard (integration registry, page, API routes)
+  src/rag/                           Chunking, embeddings, ingestion, retrieval, answer generation
+  src/connectors/                     Fireflies, Zoom, Google Meet, Intercom, Zendesk, HubSpot
+  migrations/                           D1 schema
 data-seed/                 Python pipeline that synthesizes demo accounts + usage history into PostHog
 ```
 

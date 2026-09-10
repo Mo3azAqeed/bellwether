@@ -1,5 +1,6 @@
 import type { Env } from "./env.js";
 import type { DailyActivePoint } from "./posthog.js";
+import { getSettings } from "./settings.js";
 
 /** Alternative usage-data source to PostHog (src/posthog.ts) — same output
  * shape, selected via USAGE_PROVIDER (see src/usage.ts), for teams whose
@@ -44,22 +45,30 @@ interface JqlRow {
 }
 
 export async function getDailyActiveSeats(env: Env, accountId: string): Promise<DailyActivePoint[]> {
-  if (!env.MIXPANEL_PROJECT_ID || !env.MIXPANEL_SERVICE_ACCOUNT_USERNAME || !env.MIXPANEL_SERVICE_ACCOUNT_SECRET) {
+  const settings = await getSettings(env, [
+    "MIXPANEL_PROJECT_ID",
+    "MIXPANEL_SERVICE_ACCOUNT_USERNAME",
+    "MIXPANEL_SERVICE_ACCOUNT_SECRET",
+    "MIXPANEL_HOST",
+    "MIXPANEL_ACTIVE_EVENT_NAME",
+    "MIXPANEL_ACCOUNT_PROPERTY",
+  ]);
+  if (!settings.MIXPANEL_PROJECT_ID || !settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME || !settings.MIXPANEL_SERVICE_ACCOUNT_SECRET) {
     throw new Error("MIXPANEL_PROJECT_ID, MIXPANEL_SERVICE_ACCOUNT_USERNAME, and MIXPANEL_SERVICE_ACCOUNT_SECRET are required");
   }
 
-  const host = env.MIXPANEL_HOST || "https://mixpanel.com";
+  const host = settings.MIXPANEL_HOST || "https://mixpanel.com";
   const toDate = new Date().toISOString().slice(0, 10);
   const fromDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const params = new URLSearchParams({
-    project_id: env.MIXPANEL_PROJECT_ID,
+    project_id: settings.MIXPANEL_PROJECT_ID,
     script: JQL_SCRIPT,
     params: JSON.stringify({
       from_date: fromDate,
       to_date: toDate,
-      eventName: env.MIXPANEL_ACTIVE_EVENT_NAME || "app_opened",
-      accountProperty: env.MIXPANEL_ACCOUNT_PROPERTY || "account_id",
+      eventName: settings.MIXPANEL_ACTIVE_EVENT_NAME || "app_opened",
+      accountProperty: settings.MIXPANEL_ACCOUNT_PROPERTY || "account_id",
       accountId,
     }),
   });
@@ -67,7 +76,7 @@ export async function getDailyActiveSeats(env: Env, accountId: string): Promise<
   const resp = await fetch(`${host}/api/query/jql`, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${btoa(`${env.MIXPANEL_SERVICE_ACCOUNT_USERNAME}:${env.MIXPANEL_SERVICE_ACCOUNT_SECRET}`)}`,
+      Authorization: `Basic ${btoa(`${settings.MIXPANEL_SERVICE_ACCOUNT_USERNAME}:${settings.MIXPANEL_SERVICE_ACCOUNT_SECRET}`)}`,
       "content-type": "application/x-www-form-urlencoded",
     },
     body: params,

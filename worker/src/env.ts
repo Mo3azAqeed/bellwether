@@ -63,4 +63,14 @@ export interface Env {
   /** HubSpot CRM notes/engagements connector (nightly backfill, like
    * Google Meet — see src/connectors/hubspot.ts). */
   HUBSPOT_ACCESS_TOKEN?: string; // private app token
+
+  /** Gates the /setup wizard (src/setup/) — set this BEFORE your first
+   * deploy. Anyone with this token can view and change every connector
+   * credential through the UI, so treat it like an admin password. */
+  SETUP_ADMIN_TOKEN?: string;
+
+  /** Slack channel ID (not name) alerts get posted to when an account's
+   * health tier changes — see src/alerts.ts. Settable via the setup UI or
+   * as a Workers secret; unset = alerting is off. */
+  SLACK_ALERTS_CHANNEL?: string;
 }

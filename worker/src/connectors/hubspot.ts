@@ -16,6 +16,7 @@
 import type { Env } from "../env.js";
 import { ingestDocument } from "../rag/ingest.js";
 import { resolveAccountId } from "./resolve-account.js";
+import { getSetting } from "../settings.js";
 
 const API_BASE = "https://api.hubapi.com";
 
@@ -63,10 +64,11 @@ function stripHtml(html: string): string {
 }
 
 export async function backfillRecentHubSpot(env: Env): Promise<void> {
-  if (!env.HUBSPOT_ACCESS_TOKEN) return; // connector not configured
+  const token = await getSetting(env, "HUBSPOT_ACCESS_TOKEN");
+  if (!token) return; // connector not configured
 
   const sinceMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
-  const notes = await searchRecentNotes(env.HUBSPOT_ACCESS_TOKEN, sinceMs);
+  const notes = await searchRecentNotes(token, sinceMs);
 
   for (const note of notes) {
     try {
@@ -78,7 +80,7 @@ export async function backfillRecentHubSpot(env: Env): Promise<void> {
       const body = note.properties.hs_note_body;
       if (!body) continue;
 
-      const company = await findAssociatedCompanyDomain(env.HUBSPOT_ACCESS_TOKEN, note.id);
+      const company = await findAssociatedCompanyDomain(token, note.id);
       if (!company) continue;
 
       const text = stripHtml(body);

@@ -1,4 +1,5 @@
 import type { Env } from "./env.js";
+import { getSetting } from "./settings.js";
 
 interface HogQLResponse {
   results: unknown[][];
@@ -6,11 +7,14 @@ interface HogQLResponse {
 }
 
 async function runHogQL(env: Env, query: string, values?: Record<string, string>): Promise<HogQLResponse> {
-  const host = env.POSTHOG_HOST || "https://eu.posthog.com";
-  const resp = await fetch(`${host}/api/projects/${env.POSTHOG_PROJECT_ID}/query/`, {
+  const host = (await getSetting(env, "POSTHOG_HOST")) || "https://eu.posthog.com";
+  const [projectId, apiKey] = await Promise.all([getSetting(env, "POSTHOG_PROJECT_ID"), getSetting(env, "POSTHOG_API_KEY")]);
+  if (!projectId || !apiKey) throw new Error("POSTHOG_PROJECT_ID and POSTHOG_API_KEY are required");
+
+  const resp = await fetch(`${host}/api/projects/${projectId}/query/`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${env.POSTHOG_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query: { kind: "HogQLQuery", query, values } }),
