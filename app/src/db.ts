@@ -1,12 +1,9 @@
 import pg from "pg";
+import { getDatabaseConfig } from "./config.js";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set in .env");
-}
-
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: getDatabaseConfig().url });
 
 export interface DbAccount {
   account_id: string;

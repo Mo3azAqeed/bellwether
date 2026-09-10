@@ -2,29 +2,23 @@ import "dotenv/config";
 import pkg from "@slack/bolt";
 const { App } = pkg;
 
-import { findAccountByName, allDbAccounts, getAccountById, setOwnerSlackId, recordHealthSnapshot, getLatestSnapshot } from "./db.js";
+import { getConfig } from "./config.js";
+import { pool, findAccountByName, allDbAccounts, getAccountById, setOwnerSlackId, recordHealthSnapshot, getLatestSnapshot } from "./db.js";
 import { computeHealth } from "./baseline.js";
 import { buildAccountBlocks } from "./card.js";
 
-const required = [
-  "SLACK_BOT_TOKEN",
-  "SLACK_SIGNING_SECRET",
-  "SLACK_APP_TOKEN",
-  "POSTHOG_API_KEY",
-  "POSTHOG_PROJECT_ID",
-  "DATABASE_URL",
-] as const;
-for (const key of required) {
-  if (!process.env[key]) {
-    console.error(`Missing required env var ${key}. Copy .env.example to .env and fill it in.`);
-    process.exit(1);
-  }
+let config;
+try {
+  config = getConfig();
+} catch (err) {
+  console.error((err as Error).message);
+  process.exit(1);
 }
 
 const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  appToken: process.env.SLACK_APP_TOKEN,
+  token: config.slack.botToken,
+  signingSecret: config.slack.signingSecret,
+  appToken: config.slack.appToken,
   socketMode: true,
 });
 
@@ -150,7 +144,16 @@ app.view("assign_owner_modal", async ({ ack, view, client }) => {
   }
 });
 
-const port = Number(process.env.PORT) || 3000;
-app.start(port).then(() => {
-  console.log(`⚡️ Bellwether Slack app is running (socket mode, port ${port} for health checks)`);
+app.start(config.port).then(() => {
+  console.log(`⚡️ Bellwether Slack app is running (socket mode, port ${config.port} for health checks)`);
 });
+
+async function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down…`);
+  await app.stop();
+  await pool.end();
+  process.exit(0);
+}
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
