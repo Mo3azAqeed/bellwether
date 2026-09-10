@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bellwether",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Nightly health sweep: recomputes every account's tier so `@Bell` answers
+  // instantly from a cached snapshot instead of hitting PostHog live on every
+  // mention. Adjust the hour to your timezone (this is UTC).
+  "triggers": {
+    "crons": ["0 6 * * *"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bellwether",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "vectorize": [
+    {
+      "binding": "CONTEXT_INDEX",
+      "index_name": "bellwether-context"
+    }
+  ],
+
+  "ai": {
+    "binding": "AI"
+  }
+
+  // Secrets (Slack tokens, optional external LLM key) are NOT set here —
+  // see .dev.vars.example for local dev and the README for
+  // `wrangler secret put` in production.
+}

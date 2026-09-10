@@ -1,5 +1,6 @@
-import type { DbAccount } from "./db.js";
-import type { HealthSnapshot } from "./baseline.js";
+import type { DbAccount } from "../db.js";
+import type { HealthSnapshot } from "../baseline.js";
+import type { RetrievedChunk } from "../rag/retrieve.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
   stable: "Stable",
@@ -23,7 +24,8 @@ function summaryLine(h: HealthSnapshot): string {
   return `Looking healthy — tracking close to its usual baseline.`;
 }
 
-export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): any[] {
   const renewalText =
     health.renewalDaysOut >= 0
       ? `in ${health.renewalDaysOut} days`
@@ -65,6 +67,12 @@ export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot) {
           action_id: "assign_owner",
           value: account.account_id,
         },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "Why?" },
+          action_id: "explain_account",
+          value: account.account_id,
+        },
       ],
     },
     {
@@ -77,4 +85,33 @@ export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot) {
       ],
     },
   ];
+}
+
+/** Renders a grounded answer plus the source chunks it was built from, so
+ * the reader can check the citation rather than trust the model blindly. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function buildAnswerBlocks(accountName: string, answer: string, sources: RetrievedChunk[]): any[] {
+  const blocks: any[] = [
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: `*${accountName}*\n${answer}` },
+    },
+  ];
+
+  if (sources.length > 0) {
+    const sourceLines = sources
+      .map((s) => `• _${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}_: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`)
+      .join("\n");
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: `Sources:\n${sourceLines}` }],
+    });
+  } else {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "No ingested notes for this account yet — this is usage data only." }],
+    });
+  }
+
+  return blocks;
 }

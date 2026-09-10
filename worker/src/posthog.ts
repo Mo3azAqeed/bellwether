@@ -1,16 +1,16 @@
-import { getPostHogConfig } from "./config.js";
+import type { Env } from "./env.js";
 
 interface HogQLResponse {
   results: unknown[][];
   columns?: string[];
 }
 
-async function runHogQL(query: string, values?: Record<string, string>): Promise<HogQLResponse> {
-  const { host, projectId, apiKey } = getPostHogConfig();
-  const resp = await fetch(`${host}/api/projects/${projectId}/query/`, {
+async function runHogQL(env: Env, query: string, values?: Record<string, string>): Promise<HogQLResponse> {
+  const host = env.POSTHOG_HOST || "https://eu.posthog.com";
+  const resp = await fetch(`${host}/api/projects/${env.POSTHOG_PROJECT_ID}/query/`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${env.POSTHOG_API_KEY}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ query: { kind: "HogQLQuery", query, values } }),
@@ -36,7 +36,7 @@ export interface DailyActivePoint {
  * undercounts every account, not just declining ones. Rolling windows
  * measured in days-from-now (done in baseline.ts) avoid that bias.
  */
-export async function getDailyActiveSeats(accountId: string): Promise<DailyActivePoint[]> {
+export async function getDailyActiveSeats(env: Env, accountId: string): Promise<DailyActivePoint[]> {
   const query = `
     SELECT
       toDate(timestamp) AS day,
@@ -48,7 +48,7 @@ export async function getDailyActiveSeats(accountId: string): Promise<DailyActiv
     ORDER BY day ASC
   `;
 
-  const { results } = await runHogQL(query, { accountId });
+  const { results } = await runHogQL(env, query, { accountId });
   return results.map((row) => ({
     day: String(row[0]),
     activeSeats: Number(row[1]),
