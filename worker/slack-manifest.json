@@ -5,7 +5,7 @@
   },
   "display_information": {
     "name": "Bellwether",
-    "description": "Tells you when an account is about to walk away."
+    "description": "An open-source AI context layer for customer success — tells you when an account is about to walk away, and why."
   },
   "features": {
     "bot_user": {
@@ -23,15 +23,17 @@
   },
   "settings": {
     "event_subscriptions": {
+      "request_url": "https://REPLACE-WITH-YOUR-WORKER.workers.dev/slack/events",
       "bot_events": [
         "app_mention"
       ]
     },
     "interactivity": {
-      "is_enabled": true
+      "is_enabled": true,
+      "request_url": "https://REPLACE-WITH-YOUR-WORKER.workers.dev/slack/interactions"
     },
     "org_deploy_enabled": false,
-    "socket_mode_enabled": true,
+    "socket_mode_enabled": false,
     "token_rotation_enabled": false
   }
 }

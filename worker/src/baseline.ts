@@ -1,5 +1,7 @@
+import type { Env } from "./env.js";
 import type { DbAccount } from "./db.js";
-import { getDailyActiveSeats, type DailyActivePoint } from "./posthog.js";
+import type { DailyActivePoint } from "./posthog.js";
+import { getDailyActiveSeats } from "./usage.js";
 
 export interface HealthSnapshot {
   avgActiveSeats: number; // avg distinct daily active users over the current window
@@ -14,8 +16,7 @@ export interface HealthSnapshot {
 // "at_risk" (cliff pattern) from everything else with zero overlap; the
 // watch/stable boundary has some inherent overlap on small (6-20 user)
 // accounts, which matches real-world small-account anomaly detection
-// limits (confirmed against Accoil's public methodology, which doesn't
-// solve this either).
+// limits.
 const CURRENT_WINDOW_DAYS = 10;
 const BASELINE_WINDOW_DAYS = 49;
 const AT_RISK_THRESHOLD_PCT = -40;
@@ -38,8 +39,8 @@ function avgInWindow(points: DailyActivePoint[], startOffsetDays: number, endOff
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-export async function computeHealth(account: DbAccount, now: Date = new Date()): Promise<HealthSnapshot> {
-  const points = await getDailyActiveSeats(account.account_id);
+export async function computeHealth(env: Env, account: DbAccount, now: Date = new Date()): Promise<HealthSnapshot> {
+  const points = await getDailyActiveSeats(env, account.account_id);
 
   const current = avgInWindow(points, 0, CURRENT_WINDOW_DAYS, now);
   const baseline = avgInWindow(points, CURRENT_WINDOW_DAYS, CURRENT_WINDOW_DAYS + BASELINE_WINDOW_DAYS, now);
