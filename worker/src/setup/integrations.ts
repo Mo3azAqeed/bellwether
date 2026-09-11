@@ -16,7 +16,7 @@ export interface Integration {
   id: string;
   name: string;
   icon: string;
-  category: "usage" | "context" | "generation";
+  category: "usage" | "context" | "generation" | "bot";
   description: string;
   instructions: string;
   fields: IntegrationField[];
@@ -237,6 +237,32 @@ export const INTEGRATIONS: Integration[] = [
     test: async (v) => {
       const resp = await fetch("https://openrouter.ai/api/v1/auth/key", { headers: { Authorization: `Bearer ${v.OPENROUTER_API_KEY}` } });
       return resp.ok ? ok("Connected.") : failFromResponse("OpenRouter rejected this", resp);
+    },
+  },
+  {
+    id: "microsoft_teams",
+    name: "Microsoft Teams",
+    icon: "🟦",
+    category: "bot",
+    description: "The same @Bell-style bot as Slack, for Teams instead — health cards, \"Why?\" answers, buttons.",
+    instructions:
+      "Register an Azure Bot resource (portal.azure.com → create a resource → \"Azure Bot\") with messaging endpoint https://<your-worker>/api/messages. Copy its Application (client) ID and create a client secret under the linked Azure AD app registration's \"Certificates & secrets\". Then add the Teams channel under the bot resource's \"Channels\".",
+    fields: [
+      { key: "MICROSOFT_APP_ID", label: "Microsoft App ID" },
+      { key: "MICROSOFT_APP_PASSWORD", label: "Microsoft App Password (client secret)", type: "password" },
+    ],
+    test: async (v) => {
+      const resp = await fetch("https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: v.MICROSOFT_APP_ID,
+          client_secret: v.MICROSOFT_APP_PASSWORD,
+          scope: "https://api.botframework.com/.default",
+        }),
+      });
+      return resp.ok ? ok("Connected — obtained an access token.") : failFromResponse("Microsoft rejected this", resp);
     },
   },
 ];

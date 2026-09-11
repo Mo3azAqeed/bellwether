@@ -1,7 +1,8 @@
 # Bellwether
 
 An open-source AI context layer for customer success teams — tells you when
-an account is about to walk away, and lets you ask why, right from Slack.
+an account is about to walk away, and lets you ask why, right from Slack or
+Microsoft Teams.
 
 Runs entirely on Cloudflare (Workers, D1, Vectorize, Workers AI, Cron
 Triggers): no server to keep alive, no database to patch, and it's
@@ -40,8 +41,15 @@ Sources:
 | **Cloudflare Vectorize** | Embeddings of ingested notes (call transcripts, tickets), searched per-account for the "Why?" flow |
 | **Workers AI** | Free default for both embeddings and answer generation — see [Configuration](#configuration) to swap in Anthropic or OpenRouter for better answers |
 | **Cloudflare Cron Triggers** | On the interval you pick in the setup wizard (4h/8h/12h/24h): recompute every account's health tier, alert Slack on any tier change, and backfill anything a connector's webhook missed |
-| **The Worker** (`worker/`) | Everything above, tied together, answering Slack over HTTP (no long-lived process, no Socket Mode) |
-| **The setup wizard** (`/setup`) | A page the Worker serves itself — connect each integration one at a time, test the credential live, and it's saved straight to your D1 database. See [Setup wizard](#setup-wizard) |
+| **The Worker** (`worker/`) | Everything above, tied together, answering Slack and Teams over plain HTTP (no long-lived process, no Socket Mode) |
+| **The setup wizard** (`/setup`) | A page the Worker serves itself — connect each integration one at a time, test the credential live, and it's saved straight to your D1 database. See [Setup wizard](#setup-wizard) — or skip the browser entirely and use `npm run setup` (see [CLI setup](#cli-setup)) |
+
+Slack and Teams are two front ends on the same brain: `src/bot-logic.ts` parses
+"how is X doing?" / "why is X declining?", resolves the account, computes
+health or retrieves+generates an answer — all platform-agnostic. Each
+platform's own `src/slack/` or `src/teams/` code only handles that
+platform's transport (HTTP signing, card format, button/interaction model),
+so the two can never answer the same question differently.
 
 `@Bell how is X doing?` computes X's usage live from PostHog against its own
 10-day-vs-49-day baseline. `@Bell why is X declining?` (or the **Why?**
@@ -92,9 +100,10 @@ yourself: this repo is the whole thing, nothing calls home.
 
 You'll need a [Cloudflare account](https://dash.cloudflare.com/sign-up)
 (free to create — the $5/mo Workers Paid plan is only required if you turn
-on the RAG features), a Slack workspace you can install an app into, and a
-[PostHog](https://posthog.com) project receiving `app_opened` events grouped
-by account (see the schema doc linked above).
+on the RAG features), a Slack workspace and/or a Microsoft 365 tenant you can
+register a bot in (connect either or both), and a [PostHog](https://posthog.com)
+project receiving `app_opened` events grouped by account (see the schema doc
+linked above).
 
 ```bash
 cd worker
@@ -121,19 +130,28 @@ npx wrangler login
    npx wrangler d1 execute bellwether --remote --file=seed.sql
    ```
 
-4. **Set the secrets that have to exist before anything else can work**
-   (these never go in `wrangler.jsonc` or get committed):
+4. **Set the secrets for whichever chat platform(s) you're using, plus
+   `SETUP_ADMIN_TOKEN`** (these never go in `wrangler.jsonc` or get
+   committed) — connect at least one platform for the bot to be reachable
+   anywhere:
    ```bash
+   npx wrangler secret put SETUP_ADMIN_TOKEN   # pick any strong random string — gates the /setup wizard, required regardless
+
+   # Slack:
    npx wrangler secret put SLACK_BOT_TOKEN
    npx wrangler secret put SLACK_SIGNING_SECRET
-   npx wrangler secret put SETUP_ADMIN_TOKEN   # pick any strong random string — gates the /setup wizard
+
+   # Teams:
+   npx wrangler secret put MICROSOFT_APP_ID
+   npx wrangler secret put MICROSOFT_APP_PASSWORD
    ```
    PostHog/Mixpanel and every other connector's credentials do **not** need
-   `wrangler secret put` — you'll add those through the setup wizard in step
-   7, which saves them straight to your D1 database (no redeploy needed).
-   Use the CLI instead only if you'd rather not put a credential in the
-   database at all; see [Configuration](#configuration) for the full list
-   of env var names either path uses.
+   `wrangler secret put` — you'll add those through the setup wizard or the
+   CLI (steps 7-8), which save straight to your D1 database (no redeploy
+   needed). Use `wrangler secret put` for those too only if you'd rather not
+   put a credential in the database at all; see
+   [Configuration](#configuration) for the full list of env var names
+   either path uses.
 
 5. **Deploy:**
    ```bash
@@ -141,23 +159,38 @@ npx wrangler login
    ```
    Wrangler prints your Worker's URL (`https://bellwether.<you>.workers.dev`).
 
-6. **Create the Slack app.** Open
-   [`worker/slack-manifest.json`](worker/slack-manifest.json), replace the
-   two `REPLACE-WITH-YOUR-WORKER` URLs with your real Worker URL, then go to
-   [api.slack.com/apps](https://api.slack.com/apps) → *Create New App* →
-   *From an app manifest* and paste it in.
+6. **Create the Slack app and/or the Teams bot** (whichever you're using):
+
+   **Slack** — open [`worker/slack-manifest.json`](worker/slack-manifest.json),
+   replace the two `REPLACE-WITH-YOUR-WORKER` URLs with your real Worker
+   URL, then go to [api.slack.com/apps](https://api.slack.com/apps) →
+   *Create New App* → *From an app manifest* and paste it in.
    - Under **OAuth & Permissions**, install the app and copy the **Bot User
      OAuth Token** (`xoxb-...`) — that's `SLACK_BOT_TOKEN` from step 4.
    - Under **Basic Information**, copy the **Signing Secret** — that's
      `SLACK_SIGNING_SECRET`.
    - Invite `@Bell` to a channel (`/invite @Bell`).
 
+   **Teams** — in the [Azure Portal](https://portal.azure.com), create an
+   "Azure Bot" resource with messaging endpoint
+   `https://<your-worker>/api/messages`. That creates a linked Azure AD app
+   registration:
+   - Copy the bot's **Microsoft App ID** — that's `MICROSOFT_APP_ID`.
+   - Under the app registration's **Certificates & secrets**, create a
+     client secret — that's `MICROSOFT_APP_PASSWORD`.
+   - Under the bot resource's **Channels**, add the **Microsoft Teams**
+     channel.
+   - Sideload the bot into a team (or DM it directly) via Teams' app
+     upload flow.
+
 7. **Open the setup wizard** at `https://<your-worker>/setup`, enter the
    `SETUP_ADMIN_TOKEN` you set in step 4, and connect PostHog (or Mixpanel)
    plus whichever context sources you want — see
-   [Setup wizard](#setup-wizard) below.
+   [Setup wizard](#setup-wizard) below. Or use `npm run setup` instead — see
+   [CLI setup](#cli-setup).
 
-8. Ask `@Bell how is <account name> doing?` in Slack.
+8. Ask `@Bell how is <account name> doing?` in Slack, or just message the
+   bot directly in Teams.
 
 ## Setup wizard
 
@@ -189,7 +222,49 @@ page that gates access to everything else could grant access to itself.
 The wizard is also where you set the **alerts channel** (a Slack channel ID
 Bellwether posts to whenever an account's tier changes) and the **sync
 frequency** (see [How data stays fresh](#how-data-stays-fresh)) — both save
-instantly, no redeploy.
+instantly, no redeploy. Microsoft Teams' own credentials
+(`MICROSOFT_APP_ID`/`MICROSOFT_APP_PASSWORD`) show up here too, under
+"Bots," with a real live test (they're checked against Microsoft's own
+token endpoint) — everything except Slack itself can be configured from
+this one page.
+
+## CLI setup
+
+Prefer never opening a browser for this: `npm run setup` (writes to your
+deployed/remote database) or `npm run setup:local` (writes to a local
+`wrangler dev` database instead) is the exact same integration list, the
+exact same live "test before saving" behavior — it's the same code, just
+driven from a terminal menu instead of clicking cards. No
+`SETUP_ADMIN_TOKEN` needed for this path either: it writes to D1 directly
+via `wrangler d1 execute` (the same mechanism `npm run seed:sql` uses),
+never touching the deployed Worker's HTTP API at all.
+
+```
+$ npm run setup
+
+Integrations:
+  1. 📊  PostHog — Product usage data — powers the health-tier calculation.
+  2. 📈  Mixpanel — Alternative to PostHog for usage data...
+  ...
+  11. 🟦  Microsoft Teams — The same @Bell-style bot as Slack, for Teams instead...
+  12. Sync frequency
+  13. Alerts channel
+  0. Done
+
+Pick a number: 1
+📊  PostHog
+PostHog → Settings → Personal API Keys → create one with query read access...
+  API key: phx_...
+  Project ID: 95813
+  Host (optional, defaults to eu.posthog.com):
+  Testing...
+  ✓ Connected.
+  Saved. Takes effect immediately — no redeploy needed.
+```
+
+Slack and Teams themselves still need their own app registration (a manifest,
+an Azure Bot resource) — that's step 6 in [Deploy](#deploy), not something a
+credential-only CLI can do for you.
 
 ## Meeting transcripts & other context (the "Why?" flow)
 
@@ -301,17 +376,19 @@ domain matches.)
 ## Configuration
 
 Every row below can be set either through the [setup wizard](#setup-wizard)
-(saved to D1) or as a Workers secret/var (`wrangler secret put <NAME>`, or
-a plain var in `wrangler.jsonc` for non-secret ones) — D1 is checked first,
-so the wizard always wins if both are set (`src/settings.ts`). Only three
-are required before your first deploy, because they're needed to reach or
-trust the wizard at all:
+(saved to D1) — or the [CLI](#cli-setup), which is the same thing — or as a
+Workers secret/var (`wrangler secret put <NAME>`, or a plain var in
+`wrangler.jsonc` for non-secret ones); D1 is checked first, so the wizard/CLI
+always win if both are set (`src/settings.ts`). `SETUP_ADMIN_TOKEN` plus at
+least one of the Slack or Teams pairs are required before your first
+deploy, because they're needed to reach the bot or the wizard at all —
+everything else can wait until you're through the wizard:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SLACK_BOT_TOKEN` | yes, secret only | Bot User OAuth Token (`xoxb-...`) |
-| `SLACK_SIGNING_SECRET` | yes, secret only | Verifies requests are from Slack |
 | `SETUP_ADMIN_TOKEN` | yes, secret only | Gates `/setup` — never settable through the UI itself |
+| `SLACK_BOT_TOKEN` / `SLACK_SIGNING_SECRET` | if using Slack, secret only | Bot User OAuth Token, and the secret that verifies requests are from Slack |
+| `MICROSOFT_APP_ID` / `MICROSOFT_APP_PASSWORD` | if using Teams | The Azure Bot's app ID and client secret — wizard/CLI-settable, unlike Slack's |
 | `USAGE_PROVIDER` | no | `posthog` (default) or `mixpanel` |
 | `POSTHOG_API_KEY` / `POSTHOG_PROJECT_ID` | if using PostHog | Personal API key with query read access, and project ID |
 | `POSTHOG_HOST` | no | Defaults to `https://eu.posthog.com` |
@@ -350,8 +427,10 @@ when testing against a real workspace locally.
 
 ```
 worker/                    Cloudflare Worker (the whole app)
-  src/index.ts              Routes + the nightly scheduled handler
+  src/index.ts              Routes + the scheduled handler
+  src/bot-logic.ts           Platform-agnostic query parsing + health/RAG resolution, shared by Slack and Teams
   src/slack/                Slack HTTP verification, Web API client, Block Kit, event/interaction handlers
+  src/teams/                 Bot Framework JWT verification, Connector API client, Adaptive Cards, activity handlers
   src/baseline.ts            Usage health-tier computation
   src/usage.ts                 Picks PostHog or Mixpanel per USAGE_PROVIDER
   src/posthog.ts, src/mixpanel.ts  The two usage-data clients
@@ -359,9 +438,10 @@ worker/                    Cloudflare Worker (the whole app)
   src/settings.ts               D1-first, env-fallback credential/config reads
   src/alerts.ts                  Tier-change Slack alerts
   src/sync-schedule.ts             Frequency gate for the scheduled handler
-  src/setup/                        The /setup wizard (integration registry, page, API routes)
+  src/setup/                        Integration registry (shared by the web wizard and the CLI) + wizard page/API routes
   src/rag/                           Chunking, embeddings, ingestion, retrieval, answer generation
   src/connectors/                     Fireflies, Zoom, Google Meet, Intercom, Zendesk, HubSpot
+  scripts/setup-cli.ts                Terminal alternative to the /setup wizard
   migrations/                           D1 schema
 data-seed/                 Python pipeline that synthesizes demo accounts + usage history into PostHog
 ```

@@ -73,4 +73,12 @@ export interface Env {
    * health tier changes — see src/alerts.ts. Settable via the setup UI or
    * as a Workers secret; unset = alerting is off. */
   SLACK_ALERTS_CHANNEL?: string;
+
+  /** Microsoft Teams bot — see src/teams/. From your Azure Bot resource
+   * (Bot Framework "App ID" / "App Password", a.k.a. the Azure AD app
+   * registration's client ID/secret). Both required to run the Teams bot
+   * at all: the ID to verify incoming tokens are addressed to you, the
+   * password to get an outbound token to actually reply. */
+  MICROSOFT_APP_ID?: string;
+  MICROSOFT_APP_PASSWORD?: string;
 }

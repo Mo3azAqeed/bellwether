@@ -14,6 +14,8 @@ import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
 import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
+import { verifyTeamsAuth } from "./teams/verify.js";
+import { handleTeamsActivity, type TeamsActivity } from "./teams/handlers.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -225,6 +227,29 @@ async function handleZendeskWebhook(req: Request, env: Env, ctx: ExecutionContex
   return json({ ok: true });
 }
 
+/** Bot Framework's conventional path for a bot's messaging endpoint —
+ * Teams sends every activity (messages, button clicks, the bot being
+ * added to a channel) here. */
+async function handleTeamsMessages(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const [appId, appPassword] = await Promise.all([getSetting(env, "MICROSOFT_APP_ID"), getSetting(env, "MICROSOFT_APP_PASSWORD")]);
+  if (!appId || !appPassword) {
+    return json({ error: "Teams connector is disabled: set MICROSOFT_APP_ID and MICROSOFT_APP_PASSWORD." }, 501);
+  }
+
+  const ok = await verifyTeamsAuth(req.headers.get("authorization"), appId);
+  if (!ok) return new Response("invalid token", { status: 401 });
+
+  const activity = safeJsonParse<TeamsActivity>(await req.text());
+  if (!activity) return json({ error: "invalid JSON body" }, 400);
+
+  // Bot Framework expects a fast 200 (no strict 3s deadline like Slack, but
+  // the same "don't make the channel wait on the real work" principle
+  // applies); the actual reply goes out asynchronously via the Conversations
+  // API from inside handleTeamsActivity.
+  ctx.waitUntil(handleTeamsActivity(env, activity).catch((err) => console.error("handleTeamsActivity failed", err)));
+  return json({ ok: true });
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -249,6 +274,9 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/webhooks/zendesk") {
       return handleZendeskWebhook(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/api/messages") {
+      return handleTeamsMessages(req, env, ctx);
     }
     if (req.method === "GET" && url.pathname === "/setup") {
       return handleSetupPage(env);

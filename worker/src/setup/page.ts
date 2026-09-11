@@ -112,10 +112,12 @@ export function renderSetupPage(integrations: ClientIntegration[]): string {
       <h2 class="section">Answer quality (optional)</h2>
       <div class="grid" data-category="generation"></div>
 
-      <h2 class="section">Slack</h2>
+      <h2 class="section">Bots</h2>
+      <div class="grid" data-category="bot"></div>
       <div class="panel">
-        Required, set up separately (it needs a Slack app manifest, not just a key) —
+        <strong>Slack</strong> is set up separately — it needs an app manifest, not just a key —
         see the <a href="https://github.com/Mo3azAqeed/bellwether#deploy" target="_blank">README</a>.
+        Connect at least one of Slack or Teams for the bot to be reachable anywhere.
       </div>
 
       <h2 class="section">Alerts</h2>
@@ -209,7 +211,7 @@ function applyStatus(body) {
 }
 
 function renderDashboard() {
-  ["usage", "context", "generation"].forEach(function (category) {
+  ["usage", "context", "generation", "bot"].forEach(function (category) {
     var container = document.querySelector('.grid[data-category="' + category + '"]');
     container.innerHTML = "";
     INTEGRATIONS.filter(function (i) { return i.category === category; }).forEach(function (integration) {
