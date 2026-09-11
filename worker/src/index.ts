@@ -19,6 +19,18 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+/** A malformed body should get a clean 400, not an uncaught exception —
+ * matters most for handleZoomWebhook, where Zoom's unsigned CRC handshake
+ * means this runs before any secret/signature check, so it's reachable by
+ * anyone, not just holders of a valid webhook secret. */
+function safeJsonParse<T>(raw: string): T | undefined {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const rawBody = await req.text();
   const ok = await verifySlackRequest(
@@ -29,7 +41,8 @@ async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext):
   );
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const payload = safeJsonParse<Record<string, unknown>>(rawBody);
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
 
   if (payload.type === "url_verification") {
     return json({ challenge: payload.challenge });
@@ -40,8 +53,11 @@ async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext):
     if (event.type === "app_mention") {
       // Slack expects a response within 3s and retries on timeout; do the
       // actual work in the background via waitUntil so we can return
-      // immediately without risking a duplicate retry mid-reply.
-      ctx.waitUntil(handleAppMention(env, event));
+      // immediately without risking a duplicate retry mid-reply. Each
+      // handler already gives the user a Slack-visible error on failure
+      // (see slack/handlers.ts) — this .catch is just so a bug that slips
+      // past that still logs cleanly instead of showing as "Uncaught".
+      ctx.waitUntil(handleAppMention(env, event).catch((err) => console.error("handleAppMention failed", err)));
     }
   }
 
@@ -59,15 +75,16 @@ async function handleSlackInteractions(req: Request, env: Env, ctx: ExecutionCon
   if (!ok) return new Response("invalid signature", { status: 401 });
 
   const params = new URLSearchParams(rawBody);
-  const payload = JSON.parse(params.get("payload") ?? "{}");
+  const payload = safeJsonParse<Record<string, unknown>>(params.get("payload") ?? "{}");
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
 
   if (payload.type === "block_actions") {
-    ctx.waitUntil(handleBlockAction(env, payload));
+    ctx.waitUntil(handleBlockAction(env, payload).catch((err) => console.error("handleBlockAction failed", err)));
     return json({ ok: true });
   }
 
   if (payload.type === "view_submission") {
-    ctx.waitUntil(handleViewSubmission(env, payload));
+    ctx.waitUntil(handleViewSubmission(env, payload).catch((err) => console.error("handleViewSubmission failed", err)));
     return json({ response_action: "clear" });
   }
 
@@ -114,7 +131,8 @@ async function handleFirefliesWebhook(req: Request, env: Env, ctx: ExecutionCont
     return json({ error: "unauthorized" }, 401);
   }
 
-  const body = await req.json<{ meetingId?: string; eventType?: string }>();
+  const body = safeJsonParse<{ meetingId?: string; eventType?: string }>(await req.text());
+  if (!body) return json({ error: "invalid JSON body" }, 400);
   if (body.eventType && body.eventType !== "Transcription completed") {
     return json({ ok: true, skipped: "not a completion event" });
   }
@@ -137,7 +155,8 @@ async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext):
   }
 
   const rawBody = await req.text();
-  const parsed = JSON.parse(rawBody) as { event: string; payload: Record<string, unknown> };
+  const parsed = safeJsonParse<{ event: string; payload: Record<string, unknown> }>(rawBody);
+  if (!parsed) return json({ error: "invalid JSON body" }, 400);
 
   // Zoom's one-time handshake when you register the endpoint URL — must be
   // answered correctly before Zoom will deliver real events, and isn't
@@ -172,7 +191,8 @@ async function handleIntercomWebhook(req: Request, env: Env, ctx: ExecutionConte
   const ok = await verifyIntercomSignature(clientSecret, req.headers.get("x-hub-signature"), rawBody);
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const payload = JSON.parse(rawBody) as { topic?: string; data?: { item?: { id?: string } } };
+  const payload = safeJsonParse<{ topic?: string; data?: { item?: { id?: string } } }>(rawBody);
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
   const conversationId = payload.data?.item?.id;
   if (payload.topic?.startsWith("conversation.") && conversationId) {
     ctx.waitUntil(
@@ -196,8 +216,8 @@ async function handleZendeskWebhook(req: Request, env: Env, ctx: ExecutionContex
     return json({ error: "unauthorized" }, 401);
   }
 
-  const body = await req.json<{ ticketId?: string | number }>();
-  if (!body.ticketId) return json({ error: "missing ticketId" }, 400);
+  const body = safeJsonParse<{ ticketId?: string | number }>(await req.text());
+  if (!body?.ticketId) return json({ error: "missing ticketId" }, 400);
 
   ctx.waitUntil(
     ingestZendeskTicket(env, body.ticketId).catch((err) => console.error(`zendesk webhook ingest failed for ${body.ticketId}`, err))

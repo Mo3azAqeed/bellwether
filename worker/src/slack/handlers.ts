@@ -95,8 +95,20 @@ async function handleHealthQuery(env: Env, channel: string, threadTs: string | u
 }
 
 async function handleQuestion(env: Env, channel: string, threadTs: string | undefined, account: DbAccount, question: string) {
-  const chunks = await retrieveContext(env, account.account_id, question);
-  const answer = await generateAnswer(env, account.name, question, chunks);
+  let chunks, answer;
+  try {
+    chunks = await retrieveContext(env, account.account_id, question);
+    answer = await generateAnswer(env, account.name, question, chunks);
+  } catch (err) {
+    console.error("retrieveContext/generateAnswer failed", err);
+    await postMessage(env.SLACK_BOT_TOKEN, {
+      channel,
+      thread_ts: threadTs,
+      text: `Couldn't pull an answer for ${account.name} right now — try again in a moment.`,
+    });
+    return;
+  }
+
   await postMessage(env.SLACK_BOT_TOKEN, {
     channel,
     thread_ts: threadTs,
@@ -195,13 +207,21 @@ export async function handleBlockAction(env: Env, payload: any) {
       return;
     }
     const question = "What's happening with this account's usage and why?";
-    const chunks = await retrieveContext(env, accountId, question);
-    const answer = await generateAnswer(env, account.name, question, chunks);
-    await respondToInteraction(responseUrl, {
-      text: `${account.name}: ${answer}`,
-      blocks: buildAnswerBlocks(account.name, answer, chunks),
-      replace_original: false,
-    });
+    try {
+      const chunks = await retrieveContext(env, accountId, question);
+      const answer = await generateAnswer(env, account.name, question, chunks);
+      await respondToInteraction(responseUrl, {
+        text: `${account.name}: ${answer}`,
+        blocks: buildAnswerBlocks(account.name, answer, chunks),
+        replace_original: false,
+      });
+    } catch (err) {
+      console.error("retrieveContext/generateAnswer failed", err);
+      await respondToInteraction(responseUrl, {
+        text: `Couldn't pull an answer for ${account.name} right now — try again in a moment.`,
+        replace_original: false,
+      });
+    }
   }
 }
 

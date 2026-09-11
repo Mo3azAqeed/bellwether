@@ -8,6 +8,14 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+async function safeReadJson<T>(req: Request): Promise<T | undefined> {
+  try {
+    return await req.json<T>();
+  } catch {
+    return undefined;
+  }
+}
+
 /** SETUP_ADMIN_TOKEN is deliberately never read via getSetting/D1 — it's
  * the one credential that has to exist before the UI can be trusted at
  * all, so it stays a Workers secret set before first deploy, not something
@@ -61,7 +69,8 @@ export async function handleSetupStatus(req: Request, env: Env): Promise<Respons
 export async function handleTestAndSave(req: Request, env: Env): Promise<Response> {
   if (!isAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
 
-  const body = await req.json<{ integrationId: string; values: Record<string, string> }>();
+  const body = await safeReadJson<{ integrationId: string; values: Record<string, string> }>(req);
+  if (!body) return json({ error: "invalid JSON body" }, 400);
   const integration = findIntegration(body.integrationId);
   if (!integration) return json({ error: "unknown integration" }, 404);
 
@@ -86,7 +95,8 @@ export async function handleTestAndSave(req: Request, env: Env): Promise<Respons
 
 export async function handleSkip(req: Request, env: Env): Promise<Response> {
   if (!isAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
-  const body = await req.json<{ integrationId: string }>();
+  const body = await safeReadJson<{ integrationId: string }>(req);
+  if (!body) return json({ error: "invalid JSON body" }, 400);
   if (!findIntegration(body.integrationId)) return json({ error: "unknown integration" }, 404);
   await setSetting(env, `SKIPPED_${body.integrationId}`, "true");
   return json({ ok: true });
@@ -94,8 +104,8 @@ export async function handleSkip(req: Request, env: Env): Promise<Response> {
 
 export async function handleSetFrequency(req: Request, env: Env): Promise<Response> {
   if (!isAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
-  const body = await req.json<{ hours: number }>();
-  if (!(VALID_FREQUENCIES_HOURS as readonly number[]).includes(body.hours)) {
+  const body = await safeReadJson<{ hours: number }>(req);
+  if (!body || !(VALID_FREQUENCIES_HOURS as readonly number[]).includes(body.hours)) {
     return json({ error: `hours must be one of ${VALID_FREQUENCIES_HOURS.join(", ")}` }, 400);
   }
   await setSetting(env, "SYNC_FREQUENCY_HOURS", String(body.hours));
@@ -104,7 +114,8 @@ export async function handleSetFrequency(req: Request, env: Env): Promise<Respon
 
 export async function handleSetAlertsChannel(req: Request, env: Env): Promise<Response> {
   if (!isAuthorized(req, env)) return json({ error: "unauthorized" }, 401);
-  const body = await req.json<{ channel: string }>();
+  const body = await safeReadJson<{ channel: string }>(req);
+  if (!body) return json({ error: "invalid JSON body" }, 400);
   if (body.channel) await setSetting(env, "SLACK_ALERTS_CHANNEL", body.channel);
   else await deleteSetting(env, "SLACK_ALERTS_CHANNEL");
   return json({ ok: true });
