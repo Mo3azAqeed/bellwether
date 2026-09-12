@@ -16,6 +16,7 @@ import { claimSyncIfDue } from "./sync-schedule.js";
 import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
 import { verifyTeamsAuth } from "./teams/verify.js";
 import { handleTeamsActivity, type TeamsActivity } from "./teams/handlers.js";
+import { handleMcpRequest } from "./mcp/server.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -250,6 +251,21 @@ async function handleTeamsMessages(req: Request, env: Env, ctx: ExecutionContext
   return json({ ok: true });
 }
 
+/** POST /mcp — see src/mcp/server.ts for the actual protocol handling. This
+ * wrapper only gates access: same Bearer-token pattern as /ingest, checked
+ * before the request ever reaches the JSON-RPC layer. */
+async function handleMcp(req: Request, env: Env): Promise<Response> {
+  const accessToken = await getSetting(env, "MCP_ACCESS_TOKEN");
+  if (!accessToken) {
+    return json({ error: "MCP is disabled: set MCP_ACCESS_TOKEN to enable POST /mcp." }, 501);
+  }
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${accessToken}`) {
+    return json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "unauthorized" } }, 401);
+  }
+  return handleMcpRequest(req, env);
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -277,6 +293,13 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/api/messages") {
       return handleTeamsMessages(req, env, ctx);
+    }
+    if (url.pathname === "/mcp") {
+      if (req.method === "POST") return handleMcp(req, env);
+      // Streamable HTTP allows GET (open an SSE stream) and DELETE (end a
+      // session) on the same endpoint; this server is stateless and never
+      // streams, so it declines both rather than pretending to support them.
+      return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
     }
     if (req.method === "GET" && url.pathname === "/setup") {
       return handleSetupPage(env);

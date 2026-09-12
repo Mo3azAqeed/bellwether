@@ -41,15 +41,16 @@ Sources:
 | **Cloudflare Vectorize** | Embeddings of ingested notes (call transcripts, tickets), searched per-account for the "Why?" flow |
 | **Workers AI** | Free default for both embeddings and answer generation — see [Configuration](#configuration) to swap in Anthropic or OpenRouter for better answers |
 | **Cloudflare Cron Triggers** | On the interval you pick in the setup wizard (4h/8h/12h/24h): recompute every account's health tier, alert Slack on any tier change, and backfill anything a connector's webhook missed |
-| **The Worker** (`worker/`) | Everything above, tied together, answering Slack and Teams over plain HTTP (no long-lived process, no Socket Mode) |
+| **The Worker** (`worker/`) | Everything above, tied together, answering Slack, Teams, and MCP-speaking coding agents over plain HTTP (no long-lived process, no Socket Mode) |
 | **The setup wizard** (`/setup`) | A page the Worker serves itself — connect each integration one at a time, test the credential live, and it's saved straight to your D1 database. See [Setup wizard](#setup-wizard) — or skip the browser entirely and use `npm run setup` (see [CLI setup](#cli-setup)) |
 
-Slack and Teams are two front ends on the same brain: `src/bot-logic.ts` parses
-"how is X doing?" / "why is X declining?", resolves the account, computes
-health or retrieves+generates an answer — all platform-agnostic. Each
-platform's own `src/slack/` or `src/teams/` code only handles that
-platform's transport (HTTP signing, card format, button/interaction model),
-so the two can never answer the same question differently.
+Slack, Teams, and MCP (see [below](#mcp-use-it-from-your-coding-agent)) are
+three front ends on the same brain: `src/bot-logic.ts` parses "how is X
+doing?" / "why is X declining?", resolves the account, computes health or
+retrieves+generates an answer — all platform-agnostic. Each front end's own
+code only handles that platform's transport (HTTP signing, card format,
+button/interaction model, or JSON-RPC), so none of them can ever answer the
+same question differently.
 
 `@Bell how is X doing?` computes X's usage live from PostHog against its own
 10-day-vs-49-day baseline. `@Bell why is X declining?` (or the **Why?**
@@ -373,6 +374,57 @@ domain matches.)
   Slack on any change (up or down) — see the example near the top of this
   README.
 
+## MCP: use it from your coding agent
+
+The same context layer that answers `@Bell` in Slack or Teams is also
+reachable over [MCP](https://modelcontextprotocol.io) (Model Context
+Protocol) — so a Customer Success Engineer already living in Claude Code,
+Cursor, Codex, or OpenCode can ask about an account without switching to
+Slack. It's the same three questions, just callable by the agent's model
+instead of triggered by a mention: `list_accounts`, `get_account_health`,
+and `ask_about_account` (the RAG "why" flow, with citations).
+
+```bash
+npx wrangler secret put MCP_ACCESS_TOKEN   # pick any strong random string
+```
+
+Then point your coding agent at `https://<your-worker>/mcp` with that token
+as a bearer credential. The exact config lives in a different file per tool,
+but the URL and token are the same everywhere:
+
+**Claude Code:**
+```bash
+claude mcp add --transport http bellwether https://<your-worker>/mcp \
+  --header "Authorization: Bearer $MCP_ACCESS_TOKEN"
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "bellwether": {
+      "url": "https://<your-worker>/mcp",
+      "headers": { "Authorization": "Bearer <your-token>" }
+    }
+  }
+}
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.bellwether]
+url = "https://<your-worker>/mcp"
+headers = { Authorization = "Bearer <your-token>" }
+```
+
+**OpenCode**: add the same URL and bearer header under its MCP server config
+— consult OpenCode's own docs for the exact key names, since this one is
+less battle-tested here than the other three.
+
+Unset `MCP_ACCESS_TOKEN` and `/mcp` returns 501 — same fail-closed pattern as
+`INGEST_API_KEY`. See [`worker/src/mcp/server.ts`](worker/src/mcp/server.ts)
+for the actual tool implementations.
+
 ## Configuration
 
 Every row below can be set either through the [setup wizard](#setup-wizard)
@@ -398,6 +450,7 @@ everything else can wait until you're through the wizard:
 | `ANTHROPIC_API_KEY` | no | If set, RAG answers use Claude Haiku instead of the free Workers AI model |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | no | If set (and Anthropic isn't), RAG answers route through OpenRouter — one key, choice of model, including genuinely free `:free` models |
 | `INGEST_API_KEY` | no | Enables `POST /ingest`; unset = disabled |
+| `MCP_ACCESS_TOKEN` | no | Enables `POST /mcp` for coding agents (Claude Code, Cursor, Codex, OpenCode); unset = disabled |
 | `FIREFLIES_API_KEY` / `FIREFLIES_WEBHOOK_SECRET` | no | Enables the Fireflies connector |
 | `ZOOM_WEBHOOK_SECRET_TOKEN` | no | Enables the Zoom connector |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` / `GOOGLE_WORKSPACE_IMPERSONATE_EMAIL` | no | Enables the Google Meet connector |
@@ -441,6 +494,7 @@ worker/                    Cloudflare Worker (the whole app)
   src/setup/                        Integration registry (shared by the web wizard and the CLI) + wizard page/API routes
   src/rag/                           Chunking, embeddings, ingestion, retrieval, answer generation
   src/connectors/                     Fireflies, Zoom, Google Meet, Intercom, Zendesk, HubSpot
+  src/mcp/                              MCP server for coding agents — same tools as @Bell, over POST /mcp
   scripts/setup-cli.ts                Terminal alternative to the /setup wizard
   migrations/                           D1 schema
 data-seed/                 Python pipeline that synthesizes demo accounts + usage history into PostHog
