@@ -64,6 +64,18 @@ export interface Env {
    * Google Meet — see src/connectors/hubspot.ts). */
   HUBSPOT_ACCESS_TOKEN?: string; // private app token
 
+  /** Salesforce CRM connector — logged calls/emails/meetings (Task records)
+   * against an Account. OAuth2 client-credentials, so all three are needed:
+   * the org's instance URL plus an External Client App's key and secret.
+   * See src/connectors/salesforce.ts. */
+  SALESFORCE_INSTANCE_URL?: string; // e.g. https://acme.my.salesforce.com
+  SALESFORCE_CLIENT_ID?: string;
+  SALESFORCE_CLIENT_SECRET?: string;
+
+  /** Attio CRM connector — notes written on company records. Nightly
+   * backfill, see src/connectors/attio.ts. */
+  ATTIO_API_KEY?: string;
+
   /** Gates the /setup wizard (src/setup/) — set this BEFORE your first
    * deploy. Anyone with this token can view and change every connector
    * credential through the UI, so treat it like an admin password. */

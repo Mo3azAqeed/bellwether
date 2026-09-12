@@ -9,9 +9,24 @@ vi.mock("../bot-logic.js", () => ({
   resolveHealth: vi.fn(),
   resolveQuestion: vi.fn(),
 }));
+vi.mock("../rag/retrieve.js", () => ({
+  retrieveContext: vi.fn(),
+}));
 
 const { allDbAccounts, findAccountByName } = await import("../db.js");
 const { resolveHealth, resolveQuestion } = await import("../bot-logic.js");
+const { retrieveContext } = await import("../rag/retrieve.js");
+
+const fakeAccount = {
+  account_id: "1",
+  name: "Northwind",
+  plan: "pro",
+  seats_purchased: 40,
+  renewal_date: "2026-11-01",
+  csm_owner_name: null,
+  csm_owner_slack_id: null,
+  usage_pattern: null,
+};
 const { handleMcpRequest, callTool, TOOLS } = await import("./server.js");
 
 const fakeEnv = {} as Env;
@@ -36,7 +51,7 @@ describe("handleMcpRequest", () => {
     });
   });
 
-  it("lists all three tools with schemas", async () => {
+  it("lists all four tools with schemas", async () => {
     const res = await handleMcpRequest(rpcRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }), fakeEnv);
     const body = await res.json();
     expect(body.result.tools).toEqual(TOOLS);
@@ -44,6 +59,7 @@ describe("handleMcpRequest", () => {
       "list_accounts",
       "get_account_health",
       "ask_about_account",
+      "get_account_context",
     ]);
   });
 
@@ -171,5 +187,58 @@ describe("callTool", () => {
     const result = await callTool(fakeEnv, "delete_everything", {});
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe("Unknown tool: delete_everything");
+  });
+});
+
+describe("get_account_context", () => {
+  it("returns excerpts verbatim, with source and date, and never calls a model", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(retrieveContext).mockResolvedValueOnce([
+      { id: "c1", source: "zoom", occurredAt: "2026-08-14", chunkText: "our admin Sarah actually left last month", score: 0.91 },
+      { id: "c2", source: "intercom", occurredAt: null, chunkText: "SSO cert expired, blocking new logins", score: 0.77 },
+    ]);
+
+    const result = await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "champion" });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("our admin Sarah actually left last month");
+    expect(result.content[0].text).toContain("[1] zoom · 2026-08-14 (relevance 0.91)");
+    // no occurredAt — the date segment is omitted rather than printed as null
+    expect(result.content[0].text).toContain("[2] intercom (relevance 0.77)");
+  });
+
+  it("clamps limit into 1..20 and passes it through to retrieval", async () => {
+    vi.mocked(findAccountByName).mockResolvedValue(fakeAccount);
+    vi.mocked(retrieveContext).mockResolvedValue([]);
+
+    await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "x", limit: 999 });
+    expect(vi.mocked(retrieveContext).mock.calls.at(-1)?.[3]).toBe(20);
+
+    await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "x", limit: 0 });
+    expect(vi.mocked(retrieveContext).mock.calls.at(-1)?.[3]).toBe(1);
+
+    await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "x" });
+    expect(vi.mocked(retrieveContext).mock.calls.at(-1)?.[3]).toBe(5);
+  });
+
+  it("says plainly when nothing relevant is on file, without treating it as an error", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(retrieveContext).mockResolvedValueOnce([]);
+    const result = await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "pricing" });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("no context has been connected");
+  });
+
+  it("requires both account and topic", async () => {
+    const result = await callTool(fakeEnv, "get_account_context", { account: "Northwind" });
+    expect(result.isError).toBe(true);
+  });
+
+  it("reports a retrieval failure instead of throwing", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(retrieveContext).mockRejectedValueOnce(new Error("vectorize down"));
+    const result = await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "x" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Couldn't search");
   });
 });

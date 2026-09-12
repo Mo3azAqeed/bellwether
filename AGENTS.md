@@ -166,8 +166,9 @@ browser for this — you can do it directly. Ask, one at a time, conversationall
    `README.md` for exact field names).
 2. "Any of these for the 'why is this account declining' feature: Fireflies,
    Zoom, Google Meet for call transcripts; Intercom or Zendesk for support;
-   HubSpot for CRM notes?" Only ask about ones they're likely to actually
-   use — don't read them the whole list mechanically.
+   HubSpot, Salesforce or Attio for CRM notes?" Only ask about ones they're
+   likely to actually use — don't read them the whole list mechanically.
+   Ask which CRM they use rather than listing all three at them.
 3. For each one they want, write the value straight to their database —
    this is the same mechanism the `/setup` web wizard and `npm run setup`
    CLI both use, so it takes effect immediately, no redeploy:

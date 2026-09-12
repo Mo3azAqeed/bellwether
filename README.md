@@ -329,6 +329,32 @@ backfill, no webhook to configure):
 npx wrangler secret put HUBSPOT_ACCESS_TOKEN   # private app with crm.objects.notes.read + crm.objects.companies.read
 ```
 
+**Salesforce** (logged calls, emails and meetings — `Task` records against an
+Account; nightly backfill):
+```bash
+npx wrangler secret put SALESFORCE_INSTANCE_URL    # https://acme.my.salesforce.com
+npx wrangler secret put SALESFORCE_CLIENT_ID
+npx wrangler secret put SALESFORCE_CLIENT_SECRET
+```
+In Salesforce: Setup → **External Client Apps** → create one, enable OAuth
+with **Enable Client Credentials Flow** and a run-as user whose permissions
+decide what this can see, then copy the consumer key and secret. (Older orgs
+use Connected Apps; new Connected App creation is disabled by default from
+Spring '26 onward.) Accounts are matched to yours by the Account's
+**Website** field, so populate it — or add the domain to `account_domains`
+below. Salesforce's newer "enhanced notes" (`ContentNote`) are deliberately
+not read: they need a `ContentDocumentLink` join plus base64 decoding and
+follow separate content sharing rules. Open an issue if your CS context
+lives there.
+
+**Attio** (notes written on company records; nightly backfill):
+```bash
+npx wrangler secret put ATTIO_API_KEY   # Workspace settings → Developers → access token, read on Records + Notes
+```
+Only notes whose parent is a *company* are ingested — Attio lets you attach
+notes to people and deals too, but those don't map onto an account without
+guessing, and a wrong guess files one customer's context under another's.
+
 **Anything else** (a manual export, a different helpdesk, a spreadsheet —
 whatever): the generic ingestion endpoint takes plain text and metadata, so
 a Zapier/Make automation or a one-off script can feed it:
@@ -362,13 +388,33 @@ domain matches.)
 - **Support conversations & meeting transcripts**: Fireflies, Zoom,
   Intercom, and Zendesk all arrive within minutes via webhook, as soon as
   the underlying event (call transcribed, ticket solved) happens — that part
-  isn't on the frequency schedule above. Google Meet and HubSpot are
-  backfill-only (same schedule as usage numbers above — real-time would need
-  infrastructure outside Cloudflare for Meet, and a public-app webhook
-  subscription for HubSpot). Each due run also re-checks the last 2 days of
-  Fireflies transcripts as a safety net for any webhook delivery that
-  failed — so the worst case for any source is one sync interval, not
-  "silently lost forever."
+  isn't on the frequency schedule above. Google Meet, HubSpot, Salesforce
+  and Attio are backfill-only (same schedule as usage numbers above —
+  real-time would need infrastructure outside Cloudflare for Meet, and a
+  public-app webhook subscription for the CRMs). Each due run also re-checks
+  the last 2 days of Fireflies transcripts as a safety net for any webhook
+  delivery that failed — so the worst case for any source is one sync
+  interval, not "silently lost forever."
+
+**The honest limits of that**, since "reliable sync" deserves specifics
+rather than a promise:
+
+- Every backfill re-reads a *window*, not everything since last time:
+  Salesforce asks for `Task` records modified in the last 2 days, Attio
+  pages back through the 250 most recent notes, HubSpot and Google Meet
+  look back 2 days. Anything ingested twice is deduped by source id, so
+  overlapping runs are free — the failure mode to know about is the other
+  direction. If the Worker can't run for longer than that window (a
+  Cloudflare outage, a revoked credential nobody noticed), records older
+  than the window are not picked up on the next successful run.
+- Practically: with the default 24h sync and a 2-day lookback you have a 2x
+  safety margin, and each source is independent — one CRM's expired token
+  doesn't stop the others (each backfill is wrapped in its own try/catch and
+  logs rather than aborting the run).
+- If you need a genuinely gapless CRM history, backfill the range you care
+  about once through `POST /ingest`, which takes arbitrary text and dates —
+  the scheduled connectors are built to keep an already-current picture
+  current, not to reconstruct years of history.
 - **Alerts**: if you set an alerts channel in the wizard, every due sync run
   compares each account's new tier against its previous one and posts to
   Slack on any change (up or down) — see the example near the top of this
@@ -380,9 +426,15 @@ The same context layer that answers `@Bell` in Slack or Teams is also
 reachable over [MCP](https://modelcontextprotocol.io) (Model Context
 Protocol) — so a Customer Success Engineer already living in Claude Code,
 Cursor, Codex, or OpenCode can ask about an account without switching to
-Slack. It's the same three questions, just callable by the agent's model
-instead of triggered by a mention: `list_accounts`, `get_account_health`,
-and `ask_about_account` (the RAG "why" flow, with citations).
+Slack. Four tools, callable by the agent's model instead of triggered by a
+mention:
+
+| Tool | What it does | Server-side model cost |
+|---|---|---|
+| `list_accounts` | Lists/filters the accounts being tracked | none |
+| `get_account_health` | Usage against the account's own baseline, tier, renewal | none |
+| `get_account_context` | Returns the raw matching excerpts — transcripts, tickets, CRM notes — verbatim, no summarization | none |
+| `ask_about_account` | The RAG "why" flow: retrieves, then has a model answer from only what it found, with citations | one short call |
 
 ```bash
 npx wrangler secret put MCP_ACCESS_TOKEN   # pick any strong random string
@@ -425,6 +477,52 @@ Unset `MCP_ACCESS_TOKEN` and `/mcp` returns 501 — same fail-closed pattern as
 `INGEST_API_KEY`. See [`worker/src/mcp/server.ts`](worker/src/mcp/server.ts)
 for the actual tool implementations.
 
+### Who pays for what (bring your own key)
+
+A fair worry before wiring this into Claude Code or Codex: *will this burn
+through my credits?* There are two separate budgets here, and you control
+both:
+
+1. **Your coding agent's own tokens.** Claude Code, Cursor, and Codex each
+   pay for reading a tool's result into their context — that's their
+   subscription or API key, and no tool can change it. Bellwether's tool
+   results are deliberately short (a health line, a handful of excerpts),
+   not whole transcripts.
+2. **Bellwether's own model call**, which happens inside *your* Worker with
+   *your* key — and three of the four tools don't make one at all. Only
+   `ask_about_account` generates, and you choose what generates it:
+
+| Configured | Used for "Why?" answers | Cost |
+|---|---|---|
+| nothing (default) | Workers AI (`llama-3.1-8b-instruct`) | $0 — included in Workers |
+| `OPENROUTER_API_KEY` (+ optional `OPENROUTER_MODEL`) | whatever model you name | your OpenRouter balance |
+| `ANTHROPIC_API_KEY` | Claude Haiku | your Anthropic balance |
+
+Anthropic wins if both are set; otherwise OpenRouter; otherwise the free
+Workers AI default. Retrieval embeddings always run on Workers AI and never
+cost extra.
+
+So if you want cheap-but-better-than-default answers, point it at something
+like DeepSeek through OpenRouter:
+
+```bash
+npx wrangler secret put OPENROUTER_API_KEY
+echo "INSERT INTO settings (key, value, updated_at) VALUES ('OPENROUTER_MODEL', 'deepseek/deepseek-chat', datetime('now')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;" \
+  | npx wrangler d1 execute bellwether --remote
+```
+
+(Or set both through the setup wizard / `npm run setup`, which is the same
+thing with a UI. Check [openrouter.ai/models](https://openrouter.ai/models)
+for current pricing, and note some models are genuinely free.)
+
+**And if you'd rather spend nothing server-side at all:** use
+`get_account_context` instead of `ask_about_account`. It returns the raw
+excerpts and lets your coding agent's own model — which you're already
+paying for — do the reasoning. Same retrieval, no second model in the
+middle, and you see the source material rather than a summary of it. That's
+usually the better tool inside a coding agent anyway; `ask_about_account`
+earns its keep in Slack and Teams, where there's no model on the other end.
+
 ## Configuration
 
 Every row below can be set either through the [setup wizard](#setup-wizard)
@@ -457,6 +555,8 @@ everything else can wait until you're through the wizard:
 | `INTERCOM_ACCESS_TOKEN` / `INTERCOM_CLIENT_SECRET` | no | Enables the Intercom connector |
 | `ZENDESK_SUBDOMAIN` / `ZENDESK_EMAIL` / `ZENDESK_API_TOKEN` / `ZENDESK_WEBHOOK_SECRET` | no | Enables the Zendesk connector |
 | `HUBSPOT_ACCESS_TOKEN` | no | Enables the HubSpot connector |
+| `SALESFORCE_INSTANCE_URL` / `SALESFORCE_CLIENT_ID` / `SALESFORCE_CLIENT_SECRET` | no | Enables the Salesforce connector (OAuth2 client credentials) |
+| `ATTIO_API_KEY` | no | Enables the Attio connector |
 | `SLACK_ALERTS_CHANNEL` | no | Slack channel ID alerts post to on a tier change; unset = alerting off |
 | `SYNC_FREQUENCY_HOURS` | no | `4`, `8`, `12`, or `24` (default) — see [How data stays fresh](#how-data-stays-fresh) |
 
