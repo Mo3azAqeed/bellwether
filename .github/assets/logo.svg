@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30" fill="none" role="img" aria-label="Bellwether">
+  <defs>
+    <linearGradient id="bw" x1="6" y1="4" x2="25" y2="26" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6C7BFF"/><stop offset="1" stop-color="#3B4ECC"/>
+    </linearGradient>
+  </defs>
+  <g transform="rotate(-135 15 15)">
+    <path d="M15 2.4c5 4.8 9.3 9.1 9.3 14.3A9.3 9.3 0 1 1 5.7 16.7C5.7 11.5 10 7.2 15 2.4Z" fill="url(#bw)"/>
+  </g>
+</svg>

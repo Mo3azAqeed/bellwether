@@ -3,7 +3,7 @@
 This file is for AI coding agents (Claude Code, Cursor, Codex, OpenCode,
 etc.) working in this repo — either helping develop it, or helping a human
 deploy and set up their own instance of it. The full human-readable docs are
-in [`README.md`](README.md); this file is the imperative, do-this-when
+in [`README.md`](README.md) and [`docs/`](docs/); this file is the imperative, do-this-when
 version for an agent.
 
 ## If a human asks you to deploy / install / set up Bellwether
@@ -49,7 +49,7 @@ since this only reads key names, never secret values back to the human:
 npx wrangler d1 execute bellwether --remote --command "SELECT key FROM settings"
 ```
 
-Cross-reference that against the Configuration table in `README.md` to know
+Cross-reference that against [`docs/configuration.md`](docs/configuration.md) to know
 which integrations are already connected. Then summarize what you found in
 plain language before proceeding — "Looks like you already have a database
 and you're deployed. PostHog and Slack are connected; Teams and Zendesk
@@ -163,7 +163,7 @@ browser for this — you can do it directly. Ask, one at a time, conversationall
 1. "PostHog or Mixpanel for usage data?" — then ask for the credential that
    provider needs (PostHog: API key + project ID; Mixpanel: project ID +
    service account username/secret — see the Configuration table in
-   `README.md` for exact field names).
+   [`docs/configuration.md`](docs/configuration.md) for exact field names).
 2. "Any of these for the 'why is this account declining' feature: Fireflies,
    Zoom, Google Meet for call transcripts; Intercom or Zendesk for support;
    HubSpot, Salesforce or Attio for CRM notes?" Only ask about ones they're
@@ -179,7 +179,7 @@ browser for this — you can do it directly. Ask, one at a time, conversationall
    ```
 
    (Swap the key and value per credential — the Configuration table in
-   `README.md` lists every valid key.) Never print a secret value back to
+   [`docs/configuration.md`](docs/configuration.md) lists every valid key.) Never print a secret value back to
    the human in chat once they've given it to you; just confirm it saved.
 
 4. Populate `account_domains` so ingested context attaches to the right
@@ -192,12 +192,13 @@ browser for this — you can do it directly. Ask, one at a time, conversationall
 
    Ask the human for their real account IDs/domains rather than guessing —
    if they haven't loaded any accounts yet, point them at the "Load your
-   accounts" step in `README.md` first (`data-seed/accounts.json` shape,
+   accounts" step in [`docs/deploy.md`](docs/deploy.md) first (`data-seed/accounts.json` shape,
    `npm run seed:sql`).
 
 If any webhook-based connector (Fireflies, Zoom, Intercom, Zendesk) needs a
 webhook registered on the provider's side, tell the human the exact URL and
-what to subscribe to (see `README.md`'s per-connector instructions) — that
+what to subscribe to (see [`docs/connectors.md`](docs/connectors.md) for the
+per-connector instructions) — that
 registration step happens on the provider's own site, not something you can
 do for them.
 
@@ -219,7 +220,7 @@ npx wrangler secret put MCP_ACCESS_TOKEN   # generate a strong random value
 ```
 
 Then add it to whichever agent they're using — see the "MCP: use it from
-your coding agent" section of `README.md` for the exact config snippet per
+your coding agent" page, [`docs/mcp.md`](docs/mcp.md), for the config snippet per
 tool (Claude Code, Cursor, Codex CLI, OpenCode).
 
 ### 10. Mention the file-based context, and prefer it yourself
@@ -259,7 +260,7 @@ those files changes nothing upstream and the next pull overwrites them.
   to `worker/` done. There's no CI here yet — you're the check.
 - Don't add a new connector's credentials as `env.X` typed fields without
   also adding them to the `Env` interface in `worker/src/env.ts` and the
-  Configuration table in `README.md`.
+  Configuration table in [`docs/configuration.md`](docs/configuration.md).
 - Anything under `worker/scripts/` that formats output keeps the formatting
   in a pure module under `worker/src/` and the I/O in the script — see
   `src/context/format.ts` vs `scripts/context-pull.ts`. That's what makes
