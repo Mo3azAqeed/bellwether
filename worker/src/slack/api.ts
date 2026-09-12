@@ -11,7 +11,18 @@ async function call(botToken: string, method: string, payload: Record<string, un
     },
     body: JSON.stringify(payload),
   });
-  const json = await resp.json<{ ok: boolean; error?: string }>();
+
+  // Slack's API always replies 200 with {ok:false,error} even for auth
+  // failures — but a proxy/outage in between can still hand back a
+  // non-JSON body (an HTML error page, a plain-text block message), so
+  // parse defensively rather than assuming resp.json() will succeed.
+  const rawBody = await resp.text();
+  let json: { ok: boolean; error?: string };
+  try {
+    json = JSON.parse(rawBody);
+  } catch {
+    throw new Error(`Slack API ${method} returned a non-JSON response (HTTP ${resp.status}): ${rawBody.slice(0, 200)}`);
+  }
   if (!json.ok) {
     throw new Error(`Slack API ${method} failed: ${json.error ?? resp.status}`);
   }

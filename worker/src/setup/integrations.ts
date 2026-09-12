@@ -16,7 +16,7 @@ export interface Integration {
   id: string;
   name: string;
   icon: string;
-  category: "usage" | "context" | "generation";
+  category: "usage" | "context" | "generation" | "bot";
   description: string;
   instructions: string;
   fields: IntegrationField[];
@@ -31,6 +31,16 @@ async function ok(message: string): Promise<TestResult> {
 }
 async function fail(message: string): Promise<TestResult> {
   return { ok: false, message };
+}
+
+/** Reads the response body into the failure message rather than just the
+ * status code — the difference between "the provider says this key is
+ * invalid" and "something in between (a proxy, a firewall, an outage)
+ * never reached the provider at all" is exactly the body text, and a
+ * bare status code hides it. */
+async function failFromResponse(label: string, resp: Response): Promise<TestResult> {
+  const body = await resp.text();
+  return fail(`${label} (HTTP ${resp.status}): ${body.slice(0, 200)}`);
 }
 
 export const INTEGRATIONS: Integration[] = [
@@ -53,7 +63,7 @@ export const INTEGRATIONS: Integration[] = [
         headers: { Authorization: `Bearer ${v.POSTHOG_API_KEY}`, "content-type": "application/json" },
         body: JSON.stringify({ query: { kind: "HogQLQuery", query: "SELECT 1" } }),
       });
-      return resp.ok ? ok("Connected.") : fail(`PostHog rejected this key (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("PostHog rejected this", resp);
     },
   },
   {
@@ -79,7 +89,7 @@ export const INTEGRATIONS: Integration[] = [
         },
         body: new URLSearchParams({ project_id: v.MIXPANEL_PROJECT_ID, script: "function main(){return [];}" }),
       });
-      return resp.ok ? ok("Connected.") : fail(`Mixpanel rejected these credentials (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("Mixpanel rejected this", resp);
     },
   },
   {
@@ -100,9 +110,9 @@ export const INTEGRATIONS: Integration[] = [
         headers: { Authorization: `Bearer ${v.FIREFLIES_API_KEY}`, "content-type": "application/json" },
         body: JSON.stringify({ query: `query { transcripts(limit: 1) { id } }` }),
       });
-      if (!resp.ok) return fail(`Fireflies rejected this key (HTTP ${resp.status}).`);
+      if (!resp.ok) return failFromResponse("Fireflies rejected this", resp);
       const json = await resp.json<{ errors?: unknown[] }>();
-      return json.errors?.length ? fail("Fireflies rejected this key.") : ok("Connected.");
+      return json.errors?.length ? fail(`Fireflies rejected this: ${JSON.stringify(json.errors).slice(0, 200)}`) : ok("Connected.");
     },
   },
   {
@@ -157,7 +167,7 @@ export const INTEGRATIONS: Integration[] = [
     ],
     test: async (v) => {
       const resp = await fetch("https://api.intercom.io/me", { headers: { Authorization: `Bearer ${v.INTERCOM_ACCESS_TOKEN}` } });
-      return resp.ok ? ok("Connected.") : fail(`Intercom rejected this token (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("Intercom rejected this", resp);
     },
   },
   {
@@ -178,7 +188,7 @@ export const INTEGRATIONS: Integration[] = [
       const resp = await fetch(`https://${v.ZENDESK_SUBDOMAIN}.zendesk.com/api/v2/users/me.json`, {
         headers: { Authorization: `Basic ${btoa(`${v.ZENDESK_EMAIL}/token:${v.ZENDESK_API_TOKEN}`)}` },
       });
-      return resp.ok ? ok("Connected.") : fail(`Zendesk rejected these credentials (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("Zendesk rejected this", resp);
     },
   },
   {
@@ -193,7 +203,7 @@ export const INTEGRATIONS: Integration[] = [
       const resp = await fetch("https://api.hubapi.com/crm/v3/objects/companies?limit=1", {
         headers: { Authorization: `Bearer ${v.HUBSPOT_ACCESS_TOKEN}` },
       });
-      return resp.ok ? ok("Connected.") : fail(`HubSpot rejected this token (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("HubSpot rejected this", resp);
     },
   },
   {
@@ -210,7 +220,7 @@ export const INTEGRATIONS: Integration[] = [
         headers: { "x-api-key": v.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
       });
-      return resp.ok ? ok("Connected (this test made one tiny real request).") : fail(`Anthropic rejected this key (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected (this test made one tiny real request).") : failFromResponse("Anthropic rejected this", resp);
     },
   },
   {
@@ -226,7 +236,33 @@ export const INTEGRATIONS: Integration[] = [
     ],
     test: async (v) => {
       const resp = await fetch("https://openrouter.ai/api/v1/auth/key", { headers: { Authorization: `Bearer ${v.OPENROUTER_API_KEY}` } });
-      return resp.ok ? ok("Connected.") : fail(`OpenRouter rejected this key (HTTP ${resp.status}).`);
+      return resp.ok ? ok("Connected.") : failFromResponse("OpenRouter rejected this", resp);
+    },
+  },
+  {
+    id: "microsoft_teams",
+    name: "Microsoft Teams",
+    icon: "🟦",
+    category: "bot",
+    description: "The same @Bell-style bot as Slack, for Teams instead — health cards, \"Why?\" answers, buttons.",
+    instructions:
+      "Register an Azure Bot resource (portal.azure.com → create a resource → \"Azure Bot\") with messaging endpoint https://<your-worker>/api/messages. Copy its Application (client) ID and create a client secret under the linked Azure AD app registration's \"Certificates & secrets\". Then add the Teams channel under the bot resource's \"Channels\".",
+    fields: [
+      { key: "MICROSOFT_APP_ID", label: "Microsoft App ID" },
+      { key: "MICROSOFT_APP_PASSWORD", label: "Microsoft App Password (client secret)", type: "password" },
+    ],
+    test: async (v) => {
+      const resp = await fetch("https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: v.MICROSOFT_APP_ID,
+          client_secret: v.MICROSOFT_APP_PASSWORD,
+          scope: "https://api.botframework.com/.default",
+        }),
+      });
+      return resp.ok ? ok("Connected — obtained an access token.") : failFromResponse("Microsoft rejected this", resp);
     },
   },
 ];

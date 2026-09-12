@@ -14,9 +14,24 @@ import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
 import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
+import { verifyTeamsAuth } from "./teams/verify.js";
+import { handleTeamsActivity, type TeamsActivity } from "./teams/handlers.js";
+import { handleMcpRequest } from "./mcp/server.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+/** A malformed body should get a clean 400, not an uncaught exception —
+ * matters most for handleZoomWebhook, where Zoom's unsigned CRC handshake
+ * means this runs before any secret/signature check, so it's reachable by
+ * anyone, not just holders of a valid webhook secret. */
+function safeJsonParse<T>(raw: string): T | undefined {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -29,7 +44,8 @@ async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext):
   );
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const payload = safeJsonParse<Record<string, unknown>>(rawBody);
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
 
   if (payload.type === "url_verification") {
     return json({ challenge: payload.challenge });
@@ -40,8 +56,11 @@ async function handleSlackEvents(req: Request, env: Env, ctx: ExecutionContext):
     if (event.type === "app_mention") {
       // Slack expects a response within 3s and retries on timeout; do the
       // actual work in the background via waitUntil so we can return
-      // immediately without risking a duplicate retry mid-reply.
-      ctx.waitUntil(handleAppMention(env, event));
+      // immediately without risking a duplicate retry mid-reply. Each
+      // handler already gives the user a Slack-visible error on failure
+      // (see slack/handlers.ts) — this .catch is just so a bug that slips
+      // past that still logs cleanly instead of showing as "Uncaught".
+      ctx.waitUntil(handleAppMention(env, event).catch((err) => console.error("handleAppMention failed", err)));
     }
   }
 
@@ -59,15 +78,16 @@ async function handleSlackInteractions(req: Request, env: Env, ctx: ExecutionCon
   if (!ok) return new Response("invalid signature", { status: 401 });
 
   const params = new URLSearchParams(rawBody);
-  const payload = JSON.parse(params.get("payload") ?? "{}");
+  const payload = safeJsonParse<Record<string, unknown>>(params.get("payload") ?? "{}");
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
 
   if (payload.type === "block_actions") {
-    ctx.waitUntil(handleBlockAction(env, payload));
+    ctx.waitUntil(handleBlockAction(env, payload).catch((err) => console.error("handleBlockAction failed", err)));
     return json({ ok: true });
   }
 
   if (payload.type === "view_submission") {
-    ctx.waitUntil(handleViewSubmission(env, payload));
+    ctx.waitUntil(handleViewSubmission(env, payload).catch((err) => console.error("handleViewSubmission failed", err)));
     return json({ response_action: "clear" });
   }
 
@@ -114,7 +134,8 @@ async function handleFirefliesWebhook(req: Request, env: Env, ctx: ExecutionCont
     return json({ error: "unauthorized" }, 401);
   }
 
-  const body = await req.json<{ meetingId?: string; eventType?: string }>();
+  const body = safeJsonParse<{ meetingId?: string; eventType?: string }>(await req.text());
+  if (!body) return json({ error: "invalid JSON body" }, 400);
   if (body.eventType && body.eventType !== "Transcription completed") {
     return json({ ok: true, skipped: "not a completion event" });
   }
@@ -137,7 +158,8 @@ async function handleZoomWebhook(req: Request, env: Env, ctx: ExecutionContext):
   }
 
   const rawBody = await req.text();
-  const parsed = JSON.parse(rawBody) as { event: string; payload: Record<string, unknown> };
+  const parsed = safeJsonParse<{ event: string; payload: Record<string, unknown> }>(rawBody);
+  if (!parsed) return json({ error: "invalid JSON body" }, 400);
 
   // Zoom's one-time handshake when you register the endpoint URL — must be
   // answered correctly before Zoom will deliver real events, and isn't
@@ -172,7 +194,8 @@ async function handleIntercomWebhook(req: Request, env: Env, ctx: ExecutionConte
   const ok = await verifyIntercomSignature(clientSecret, req.headers.get("x-hub-signature"), rawBody);
   if (!ok) return new Response("invalid signature", { status: 401 });
 
-  const payload = JSON.parse(rawBody) as { topic?: string; data?: { item?: { id?: string } } };
+  const payload = safeJsonParse<{ topic?: string; data?: { item?: { id?: string } } }>(rawBody);
+  if (!payload) return json({ error: "invalid JSON body" }, 400);
   const conversationId = payload.data?.item?.id;
   if (payload.topic?.startsWith("conversation.") && conversationId) {
     ctx.waitUntil(
@@ -196,13 +219,51 @@ async function handleZendeskWebhook(req: Request, env: Env, ctx: ExecutionContex
     return json({ error: "unauthorized" }, 401);
   }
 
-  const body = await req.json<{ ticketId?: string | number }>();
-  if (!body.ticketId) return json({ error: "missing ticketId" }, 400);
+  const body = safeJsonParse<{ ticketId?: string | number }>(await req.text());
+  if (!body?.ticketId) return json({ error: "missing ticketId" }, 400);
 
   ctx.waitUntil(
     ingestZendeskTicket(env, body.ticketId).catch((err) => console.error(`zendesk webhook ingest failed for ${body.ticketId}`, err))
   );
   return json({ ok: true });
+}
+
+/** Bot Framework's conventional path for a bot's messaging endpoint —
+ * Teams sends every activity (messages, button clicks, the bot being
+ * added to a channel) here. */
+async function handleTeamsMessages(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const [appId, appPassword] = await Promise.all([getSetting(env, "MICROSOFT_APP_ID"), getSetting(env, "MICROSOFT_APP_PASSWORD")]);
+  if (!appId || !appPassword) {
+    return json({ error: "Teams connector is disabled: set MICROSOFT_APP_ID and MICROSOFT_APP_PASSWORD." }, 501);
+  }
+
+  const ok = await verifyTeamsAuth(req.headers.get("authorization"), appId);
+  if (!ok) return new Response("invalid token", { status: 401 });
+
+  const activity = safeJsonParse<TeamsActivity>(await req.text());
+  if (!activity) return json({ error: "invalid JSON body" }, 400);
+
+  // Bot Framework expects a fast 200 (no strict 3s deadline like Slack, but
+  // the same "don't make the channel wait on the real work" principle
+  // applies); the actual reply goes out asynchronously via the Conversations
+  // API from inside handleTeamsActivity.
+  ctx.waitUntil(handleTeamsActivity(env, activity).catch((err) => console.error("handleTeamsActivity failed", err)));
+  return json({ ok: true });
+}
+
+/** POST /mcp — see src/mcp/server.ts for the actual protocol handling. This
+ * wrapper only gates access: same Bearer-token pattern as /ingest, checked
+ * before the request ever reaches the JSON-RPC layer. */
+async function handleMcp(req: Request, env: Env): Promise<Response> {
+  const accessToken = await getSetting(env, "MCP_ACCESS_TOKEN");
+  if (!accessToken) {
+    return json({ error: "MCP is disabled: set MCP_ACCESS_TOKEN to enable POST /mcp." }, 501);
+  }
+  const auth = req.headers.get("authorization");
+  if (auth !== `Bearer ${accessToken}`) {
+    return json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "unauthorized" } }, 401);
+  }
+  return handleMcpRequest(req, env);
 }
 
 export default {
@@ -229,6 +290,16 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/webhooks/zendesk") {
       return handleZendeskWebhook(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/api/messages") {
+      return handleTeamsMessages(req, env, ctx);
+    }
+    if (url.pathname === "/mcp") {
+      if (req.method === "POST") return handleMcp(req, env);
+      // Streamable HTTP allows GET (open an SSE stream) and DELETE (end a
+      // session) on the same endpoint; this server is stateless and never
+      // streams, so it declines both rather than pretending to support them.
+      return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
     }
     if (req.method === "GET" && url.pathname === "/setup") {
       return handleSetupPage(env);

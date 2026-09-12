@@ -9,11 +9,16 @@
     "db:migrate:local": "wrangler d1 migrations apply bellwether --local",
     "db:migrate:remote": "wrangler d1 migrations apply bellwether --remote",
     "typecheck": "tsc --noEmit",
+    "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json",
     "test": "vitest run",
-    "seed:sql": "node scripts/generate-seed-sql.mjs"
+    "seed:sql": "node scripts/generate-seed-sql.mjs",
+    "setup": "tsx scripts/setup-cli.ts",
+    "setup:local": "tsx scripts/setup-cli.ts --local"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^2.1.8",
     "wrangler": "^3.99.0"

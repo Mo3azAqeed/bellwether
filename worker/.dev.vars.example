@@ -12,3 +12,7 @@ POSTHOG_HOST=https://eu.posthog.com
 # hosted model instead of the free Workers AI default. Leave unset to use
 # Workers AI (no extra cost, lower quality) — see src/rag/generate.ts.
 # ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: enables POST /mcp for coding agents (Claude Code, Cursor, Codex,
+# OpenCode) — see src/mcp/server.ts. Unset = disabled, same as INGEST_API_KEY.
+# MCP_ACCESS_TOKEN=pick-any-strong-random-string

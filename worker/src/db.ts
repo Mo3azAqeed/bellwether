@@ -51,6 +51,17 @@ export async function setOwnerSlackId(db: Env["DB"], accountId: string, slackUse
     .run();
 }
 
+/** Teams' "assign owner" has no equivalent of Slack's real user reference
+ * (no Graph API lookup here to turn a typed name into a stable id), so it
+ * just overwrites the display name instead — same field the seed data's
+ * placeholder owner name lives in. */
+export async function setOwnerName(db: Env["DB"], accountId: string, name: string): Promise<void> {
+  await db
+    .prepare(`UPDATE accounts SET csm_owner_name = ?2, csm_owner_slack_id = NULL, updated_at = datetime('now') WHERE account_id = ?1`)
+    .bind(accountId, name)
+    .run();
+}
+
 export async function recordHealthSnapshot(
   db: Env["DB"],
   accountId: string,
