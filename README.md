@@ -478,6 +478,11 @@ when testing against a real workspace locally.
 
 ## Repo layout
 
+Using a coding agent (Claude Code, Cursor, Codex, OpenCode)? See
+[`AGENTS.md`](AGENTS.md) first — it has a step-by-step playbook for asking
+your agent to deploy and configure a Bellwether instance for you, the same
+way you'd walk through `dbt init`.
+
 ```
 worker/                    Cloudflare Worker (the whole app)
   src/index.ts              Routes + the scheduled handler
