@@ -16,6 +16,54 @@ the README at them — actually run the commands and react to what happens.
 Work through these phases in order. Stop and ask before moving to a phase
 that depends on the previous one having actually succeeded.
 
+Assume the human is not technical. Narrate what you're doing in plain
+language as you go ("Setting up the database where Bellwether will
+remember your accounts... done") instead of dumping raw command output at
+them, and explain *why* before you ask for anything that sounds sensitive
+("I need your Slack Bot Token next — that's what lets Bellwether post
+messages, you'll get it from Slack in the next step"). They may also
+disappear mid-setup and come back in a new conversation with no memory of
+where they left off — that's normal, not a problem to route around; it's
+exactly what Step 0 below is for.
+
+### 0. Check what's already done before doing anything
+
+Never assume this is a first run, and never start over by default —
+re-running steps that already succeeded wastes the human's time and can
+overwrite working configuration. Before Step 1, check:
+
+```bash
+cd worker
+grep database_id wrangler.jsonc          # still the placeholder, or a real ID?
+npx wrangler d1 list                     # does a "bellwether" database already exist?
+npx wrangler vectorize list              # does "bellwether-context" already exist?
+npx wrangler secret list                 # which secrets are already set (names only, never values)
+npx wrangler deployments list            # has this ever been deployed?
+```
+
+If a database already exists, you can also see *which* settings are already
+configured — without needing `SETUP_ADMIN_TOKEN` or any other secret value,
+since this only reads key names, never secret values back to the human:
+
+```bash
+npx wrangler d1 execute bellwether --remote --command "SELECT key FROM settings"
+```
+
+Cross-reference that against the Configuration table in `README.md` to know
+which integrations are already connected. Then summarize what you found in
+plain language before proceeding — "Looks like you already have a database
+and you're deployed. PostHog and Slack are connected; Teams and Zendesk
+aren't yet. Want to pick up from there?" — and skip straight to whichever
+phase below is next, rather than re-running everything.
+
+One real limitation: Cloudflare secrets are write-only, so you cannot
+recover the *value* of a previously-set `SETUP_ADMIN_TOKEN` if the human
+lost it — only that it exists. If they want to use the `/setup` web wizard
+and don't have it anymore, the fix is simply to set a new one
+(`wrangler secret put SETUP_ADMIN_TOKEN` again, overwriting the old value) —
+this doesn't affect anything already saved in D1, it only gates who can open
+the wizard page.
+
 ### 1. Prerequisites
 
 Ask which chat platform(s) they want: Slack, Microsoft Teams, or both. At
