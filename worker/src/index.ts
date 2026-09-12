@@ -10,6 +10,8 @@ import { backfillRecentGoogleMeet } from "./connectors/google-meet.js";
 import { verifyIntercomSignature, ingestIntercomConversation } from "./connectors/intercom.js";
 import { ingestZendeskTicket } from "./connectors/zendesk.js";
 import { backfillRecentHubSpot } from "./connectors/hubspot.js";
+import { backfillRecentSalesforce } from "./connectors/salesforce.js";
+import { backfillRecentAttio } from "./connectors/attio.js";
 import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
@@ -366,6 +368,18 @@ export default {
       await backfillRecentHubSpot(env);
     } catch (err) {
       console.error("hubspot backfill failed", err);
+    }
+
+    try {
+      await backfillRecentSalesforce(env);
+    } catch (err) {
+      console.error("salesforce backfill failed", err);
+    }
+
+    try {
+      await backfillRecentAttio(env);
+    } catch (err) {
+      console.error("attio backfill failed", err);
     }
   },
 } satisfies ExportedHandler<Env>;

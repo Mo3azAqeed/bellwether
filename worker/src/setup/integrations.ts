@@ -207,6 +207,49 @@ export const INTEGRATIONS: Integration[] = [
     },
   },
   {
+    id: "salesforce",
+    name: "Salesforce",
+    icon: "☁️",
+    category: "context",
+    description: "CRM activity — logged calls, emails and meetings on an Account. Nightly backfill.",
+    instructions:
+      "Salesforce Setup → External Client Apps (or Connected Apps on older orgs) → create one, enable OAuth with the \"Enable Client Credentials Flow\" option and a run-as user, then copy its consumer key and secret. Instance URL is your org's My Domain, e.g. https://acme.my.salesforce.com.",
+    fields: [
+      { key: "SALESFORCE_INSTANCE_URL", label: "Instance URL", placeholder: "https://acme.my.salesforce.com" },
+      { key: "SALESFORCE_CLIENT_ID", label: "Consumer key" },
+      { key: "SALESFORCE_CLIENT_SECRET", label: "Consumer secret", type: "password" },
+    ],
+    test: async (v) => {
+      const resp = await fetch(`${v.SALESFORCE_INSTANCE_URL.replace(/\/+$/, "")}/services/oauth2/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          client_id: v.SALESFORCE_CLIENT_ID,
+          client_secret: v.SALESFORCE_CLIENT_SECRET,
+        }),
+      });
+      return resp.ok ? ok("Connected.") : failFromResponse("Salesforce rejected this", resp);
+    },
+  },
+  {
+    id: "attio",
+    name: "Attio",
+    icon: "🧭",
+    category: "context",
+    description: "CRM notes written on company records. Nightly backfill.",
+    instructions: "Attio → Workspace settings → Developers → create an access token with read access to Records and Notes.",
+    fields: [{ key: "ATTIO_API_KEY", label: "Access token", type: "password" }],
+    test: async (v) => {
+      const resp = await fetch("https://api.attio.com/v2/objects/companies/records/query", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${v.ATTIO_API_KEY}`, "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      });
+      return resp.ok ? ok("Connected.") : failFromResponse("Attio rejected this", resp);
+    },
+  },
+  {
     id: "anthropic",
     name: "Anthropic",
     icon: "✳️",

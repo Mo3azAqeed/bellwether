@@ -16,6 +16,54 @@ the README at them — actually run the commands and react to what happens.
 Work through these phases in order. Stop and ask before moving to a phase
 that depends on the previous one having actually succeeded.
 
+Assume the human is not technical. Narrate what you're doing in plain
+language as you go ("Setting up the database where Bellwether will
+remember your accounts... done") instead of dumping raw command output at
+them, and explain *why* before you ask for anything that sounds sensitive
+("I need your Slack Bot Token next — that's what lets Bellwether post
+messages, you'll get it from Slack in the next step"). They may also
+disappear mid-setup and come back in a new conversation with no memory of
+where they left off — that's normal, not a problem to route around; it's
+exactly what Step 0 below is for.
+
+### 0. Check what's already done before doing anything
+
+Never assume this is a first run, and never start over by default —
+re-running steps that already succeeded wastes the human's time and can
+overwrite working configuration. Before Step 1, check:
+
+```bash
+cd worker
+grep database_id wrangler.jsonc          # still the placeholder, or a real ID?
+npx wrangler d1 list                     # does a "bellwether" database already exist?
+npx wrangler vectorize list              # does "bellwether-context" already exist?
+npx wrangler secret list                 # which secrets are already set (names only, never values)
+npx wrangler deployments list            # has this ever been deployed?
+```
+
+If a database already exists, you can also see *which* settings are already
+configured — without needing `SETUP_ADMIN_TOKEN` or any other secret value,
+since this only reads key names, never secret values back to the human:
+
+```bash
+npx wrangler d1 execute bellwether --remote --command "SELECT key FROM settings"
+```
+
+Cross-reference that against the Configuration table in `README.md` to know
+which integrations are already connected. Then summarize what you found in
+plain language before proceeding — "Looks like you already have a database
+and you're deployed. PostHog and Slack are connected; Teams and Zendesk
+aren't yet. Want to pick up from there?" — and skip straight to whichever
+phase below is next, rather than re-running everything.
+
+One real limitation: Cloudflare secrets are write-only, so you cannot
+recover the *value* of a previously-set `SETUP_ADMIN_TOKEN` if the human
+lost it — only that it exists. If they want to use the `/setup` web wizard
+and don't have it anymore, the fix is simply to set a new one
+(`wrangler secret put SETUP_ADMIN_TOKEN` again, overwriting the old value) —
+this doesn't affect anything already saved in D1, it only gates who can open
+the wizard page.
+
 ### 1. Prerequisites
 
 Ask which chat platform(s) they want: Slack, Microsoft Teams, or both. At
@@ -118,8 +166,9 @@ browser for this — you can do it directly. Ask, one at a time, conversationall
    `README.md` for exact field names).
 2. "Any of these for the 'why is this account declining' feature: Fireflies,
    Zoom, Google Meet for call transcripts; Intercom or Zendesk for support;
-   HubSpot for CRM notes?" Only ask about ones they're likely to actually
-   use — don't read them the whole list mechanically.
+   HubSpot, Salesforce or Attio for CRM notes?" Only ask about ones they're
+   likely to actually use — don't read them the whole list mechanically.
+   Ask which CRM they use rather than listing all three at them.
 3. For each one they want, write the value straight to their database —
    this is the same mechanism the `/setup` web wizard and `npm run setup`
    CLI both use, so it takes effect immediately, no redeploy:
@@ -173,6 +222,29 @@ Then add it to whichever agent they're using — see the "MCP: use it from
 your coding agent" section of `README.md` for the exact config snippet per
 tool (Claude Code, Cursor, Codex CLI, OpenCode).
 
+### 10. Mention the file-based context, and prefer it yourself
+
+There's a second, simpler way in that needs no token at all:
+
+```bash
+cd worker && npm run context:pull
+```
+
+That writes `context/` — one folder per account, `account.md` with the
+facts and health history, and a `notes/` folder holding each ingested
+transcript, ticket and CRM note as its own markdown file with frontmatter.
+
+**When you are working in a repo that has a `context/` folder, read those
+files before reaching for the MCP tools.** They're free to read, they're the
+source text rather than a summary of it, and they don't cost a protocol
+round trip. Reach for MCP only for what files can't answer: live usage right
+now (`get_account_health`), or semantic search across a history too large to
+read (`get_account_context`).
+
+Tell the human two things when you mention it: the folder holds real
+customer data and is gitignored on purpose, and it's regenerated — editing
+those files changes nothing upstream and the next pull overwrites them.
+
 ## Development conventions (working on Bellwether's own code)
 
 - Every credential/config read in `worker/src/` goes through
@@ -188,3 +260,7 @@ tool (Claude Code, Cursor, Codex CLI, OpenCode).
 - Don't add a new connector's credentials as `env.X` typed fields without
   also adding them to the `Env` interface in `worker/src/env.ts` and the
   Configuration table in `README.md`.
+- Anything under `worker/scripts/` that formats output keeps the formatting
+  in a pure module under `worker/src/` and the I/O in the script — see
+  `src/context/format.ts` vs `scripts/context-pull.ts`. That's what makes
+  the rendering testable without a database.

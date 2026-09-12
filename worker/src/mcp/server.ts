@@ -15,6 +15,7 @@
 import type { Env } from "../env.js";
 import { allDbAccounts, findAccountByName } from "../db.js";
 import { resolveHealth, resolveQuestion } from "../bot-logic.js";
+import { retrieveContext } from "../rag/retrieve.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -65,7 +66,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "ask_about_account",
     description:
-      'Ask a free-form question about an account (for example "why is X declining?"). Retrieves relevant ingested context — call transcripts, support tickets, CRM notes — and answers only from what it finds, with citations.',
+      'Ask a free-form question about an account (for example "why is X declining?"). Retrieves relevant ingested context — call transcripts, support tickets, CRM notes — and answers only from what it finds, with citations. Costs one small LLM call against whichever key this Bellwether deployment is configured with; use get_account_context instead if you would rather reason over the raw material yourself.',
     inputSchema: {
       type: "object",
       properties: {
@@ -73,6 +74,23 @@ export const TOOLS: ToolDef[] = [
         question: { type: "string", description: "The question to ask about this account." },
       },
       required: ["account", "question"],
+    },
+  },
+  {
+    name: "get_account_context",
+    description:
+      "Retrieve the raw source material Bellwether holds on an account for a topic — call transcripts, support tickets, CRM notes — verbatim, with no AI summarization in between. Nothing is sent to a language model server-side, so this is the cheapest way to get account context and lets you do the reasoning yourself.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string", description: "The account name, or enough of it to match uniquely." },
+        topic: {
+          type: "string",
+          description: "What to search their history for — a question or a few keywords. Used for semantic search, not as a prompt.",
+        },
+        limit: { type: "number", description: "How many excerpts to return (default 5, max 20)." },
+      },
+      required: ["account", "topic"],
     },
   },
 ];
@@ -140,6 +158,37 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         default:
           return textResult("Unexpected error answering the question.", true);
       }
+    }
+
+    case "get_account_context": {
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      const topic = typeof args.topic === "string" ? args.topic.trim() : "";
+      if (!accountQuery || !topic) return textResult("account and topic are both required.", true);
+
+      const account = await findAccountByName(env.DB, accountQuery);
+      if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+
+      const requested = typeof args.limit === "number" ? args.limit : 5;
+      const limit = Math.max(1, Math.min(20, Math.floor(requested)));
+
+      let chunks;
+      try {
+        chunks = await retrieveContext(env, account.account_id, topic, limit);
+      } catch (err) {
+        console.error("retrieveContext failed", err);
+        return textResult(`Couldn't search ${account.name}'s history right now.`, true);
+      }
+
+      if (!chunks.length) {
+        return textResult(
+          `Nothing ingested for ${account.name} matches "${topic}" — either no context has been connected for this account yet, or nothing on file is relevant.`
+        );
+      }
+
+      const excerpts = chunks
+        .map((c, i) => `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""} (relevance ${c.score.toFixed(2)})\n${c.chunkText}`)
+        .join("\n\n");
+      return textResult(`${chunks.length} excerpt(s) from ${account.name}'s history, most relevant first:\n\n${excerpts}`);
     }
 
     default:

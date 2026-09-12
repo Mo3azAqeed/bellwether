@@ -13,7 +13,9 @@
     "test": "vitest run",
     "seed:sql": "node scripts/generate-seed-sql.mjs",
     "setup": "tsx scripts/setup-cli.ts",
-    "setup:local": "tsx scripts/setup-cli.ts --local"
+    "setup:local": "tsx scripts/setup-cli.ts --local",
+    "context:pull": "tsx scripts/context-pull.ts",
+    "context:pull:local": "tsx scripts/context-pull.ts --local"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250109.0",
