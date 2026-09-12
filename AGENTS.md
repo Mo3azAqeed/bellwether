@@ -222,6 +222,29 @@ Then add it to whichever agent they're using — see the "MCP: use it from
 your coding agent" section of `README.md` for the exact config snippet per
 tool (Claude Code, Cursor, Codex CLI, OpenCode).
 
+### 10. Mention the file-based context, and prefer it yourself
+
+There's a second, simpler way in that needs no token at all:
+
+```bash
+cd worker && npm run context:pull
+```
+
+That writes `context/` — one folder per account, `account.md` with the
+facts and health history, and a `notes/` folder holding each ingested
+transcript, ticket and CRM note as its own markdown file with frontmatter.
+
+**When you are working in a repo that has a `context/` folder, read those
+files before reaching for the MCP tools.** They're free to read, they're the
+source text rather than a summary of it, and they don't cost a protocol
+round trip. Reach for MCP only for what files can't answer: live usage right
+now (`get_account_health`), or semantic search across a history too large to
+read (`get_account_context`).
+
+Tell the human two things when you mention it: the folder holds real
+customer data and is gitignored on purpose, and it's regenerated — editing
+those files changes nothing upstream and the next pull overwrites them.
+
 ## Development conventions (working on Bellwether's own code)
 
 - Every credential/config read in `worker/src/` goes through
@@ -237,3 +260,7 @@ tool (Claude Code, Cursor, Codex CLI, OpenCode).
 - Don't add a new connector's credentials as `env.X` typed fields without
   also adding them to the `Env` interface in `worker/src/env.ts` and the
   Configuration table in `README.md`.
+- Anything under `worker/scripts/` that formats output keeps the formatting
+  in a pure module under `worker/src/` and the I/O in the script — see
+  `src/context/format.ts` vs `scripts/context-pull.ts`. That's what makes
+  the rendering testable without a database.
