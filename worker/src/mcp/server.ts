@@ -150,8 +150,13 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         case "question_error":
           return textResult(`Couldn't retrieve an answer for ${account.name} right now.`, true);
         case "question": {
+          // The URL is the point of a citation inside a coding agent: the
+          // agent can open it, and so can the person reading over its shoulder.
           const sources = resolution.chunks
-            .map((c, i) => `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""}`)
+            .map(
+              (c, i) =>
+                `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""}${c.url ? `\n    ${c.url}` : ""}`
+            )
             .join("\n");
           return textResult(`${resolution.answer}${sources ? `\n\nSources:\n${sources}` : ""}`);
         }
@@ -186,7 +191,11 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
       }
 
       const excerpts = chunks
-        .map((c, i) => `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""} (relevance ${c.score.toFixed(2)})\n${c.chunkText}`)
+        .map(
+          (c, i) =>
+            `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""} (relevance ${c.score.toFixed(2)})` +
+            `${c.url ? `\n    ${c.url}` : ""}\n${c.chunkText}`
+        )
         .join("\n\n");
       return textResult(`${chunks.length} excerpt(s) from ${account.name}'s history, most relevant first:\n\n${excerpts}`);
     }

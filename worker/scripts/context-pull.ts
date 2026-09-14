@@ -104,7 +104,7 @@ function main(): void {
   // rowid, not id: chunk ids are random UUIDs, so insertion order is the
   // only thing that puts a split document back together in the right order.
   const chunks = queryD1<ChunkRow>(
-    `SELECT id, account_id, source, source_ref, chunk_text, occurred_at
+    `SELECT id, account_id, source, source_ref, source_url, chunk_text, occurred_at
      FROM context_chunks ORDER BY account_id, source, source_ref, rowid`
   );
 

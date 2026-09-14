@@ -9,6 +9,10 @@ export interface IngestInput {
    * schema change to plug in. */
   source: string;
   sourceRef?: string;
+  /** A link to the record this came from, when the connector's payload
+   * carried one. Stored verbatim and preferred over anything derived from
+   * the id later — the vendor's own URL is the one that's right. */
+  sourceUrl?: string;
   text: string;
   occurredAt?: string; // ISO date
 }
@@ -38,12 +42,20 @@ export async function ingestDocument(env: Env, input: IngestInput): Promise<{ ch
   );
 
   const stmt = env.DB.prepare(
-    `INSERT INTO context_chunks (id, account_id, source, source_ref, chunk_text, occurred_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6)`
+    `INSERT INTO context_chunks (id, account_id, source, source_ref, chunk_text, occurred_at, source_url)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
   );
   await env.DB.batch(
     ids.map((id, i) =>
-      stmt.bind(id, input.accountId, input.source, input.sourceRef ?? null, chunks[i], input.occurredAt ?? null)
+      stmt.bind(
+        id,
+        input.accountId,
+        input.source,
+        input.sourceRef ?? null,
+        chunks[i],
+        input.occurredAt ?? null,
+        input.sourceUrl ?? null
+      )
     )
   );
 

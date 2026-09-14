@@ -95,7 +95,13 @@ export function buildAnswerCard(accountName: string, answer: string, sources: Re
 
   if (sources.length > 0) {
     const sourceText = sources
-      .map((s) => `• *${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}*: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`)
+      .map((s) => {
+        const label = `${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}`;
+        // Adaptive Card TextBlocks render a markdown link; fall back to
+        // plain emphasis rather than pointing anywhere uncertain.
+        const head = s.url ? `[${label}](${s.url})` : `*${label}*`;
+        return `• ${head}: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`;
+      })
       .join("\n\n");
     body.push({ type: "TextBlock", text: `Sources:\n\n${sourceText}`, wrap: true, isSubtle: true, size: "Small" });
   } else {

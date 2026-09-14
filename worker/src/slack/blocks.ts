@@ -118,7 +118,13 @@ export function buildAnswerBlocks(accountName: string, answer: string, sources: 
 
   if (sources.length > 0) {
     const sourceLines = sources
-      .map((s) => `• _${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}_: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`)
+      .map((s) => {
+        // Slack link syntax when we know where the record lives, plain
+        // italics when we don't — never a link that goes nowhere.
+        const label = `${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}`;
+        const head = s.url ? `<${s.url}|${label}>` : `_${label}_`;
+        return `• ${head}: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`;
+      })
       .join("\n");
     blocks.push({
       type: "context",

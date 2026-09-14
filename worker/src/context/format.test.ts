@@ -30,6 +30,7 @@ function chunk(over: Partial<ChunkRow>): ChunkRow {
     account_id: "acct-001",
     source: "zoom",
     source_ref: "rec-8891",
+    source_url: null,
     chunk_text: "text",
     occurred_at: "2026-08-14",
     ...over,
@@ -132,6 +133,11 @@ describe("renderDocumentMarkdown", () => {
     expect(renderDocumentMarkdown(doc, account, GENERATED)).toContain('source_ref: "say \\"hi\\""');
   });
 
+  it("records where the original lives when the connector captured a link", () => {
+    const [doc] = groupChunks([chunk({ source_url: "https://zoom.us/rec/share/xyz" })]);
+    expect(renderDocumentMarkdown(doc, account, GENERATED)).toContain('source_url: "https://zoom.us/rec/share/xyz"');
+  });
+
   it("writes an empty frontmatter value rather than null for a missing date", () => {
     const [doc] = groupChunks([chunk({ occurred_at: null })]);
     expect(renderDocumentMarkdown(doc, account, GENERATED)).toContain('occurred_at: ""');
@@ -161,6 +167,12 @@ describe("renderAccountMarkdown", () => {
     const md = renderAccountMarkdown(account, snapshots, [], docs, NOW, GENERATED);
     expect(md).toContain("1 document(s) in `notes/` — 1 from zoom.");
     expect(md).toContain("[2026-08-14 · zoom](notes/2026-08-14-zoom-rec-8891.md)");
+  });
+
+  it("offers a way through to the original record when one is known", () => {
+    const docs = groupChunks([chunk({ source_url: "https://zoom.us/rec/share/xyz" })]);
+    const md = renderAccountMarkdown(account, snapshots, [], docs, NOW, GENERATED);
+    expect(md).toContain("[open in zoom](https://zoom.us/rec/share/xyz)");
   });
 
   it("says plainly when there's no health history or context yet", () => {

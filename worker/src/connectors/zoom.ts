@@ -29,6 +29,10 @@ interface ZoomTranscriptCompletedPayload {
       host_email: string;
       topic: string;
       start_time: string;
+      /** Zoom's own web page for the recording. Optional because it is
+       * absent on recordings with sharing disabled — in which case the
+       * citation simply carries no link rather than a broken one. */
+      share_url?: string;
       recording_files: ZoomRecordingFile[];
     };
   };
@@ -97,6 +101,9 @@ export async function ingestZoomTranscript(env: Env, body: ZoomTranscriptComplet
     accountId,
     source: "zoom",
     sourceRef: object.uuid,
+    // A Zoom recording id can't be turned into a URL, so the payload's own
+    // share_url is the only way a citation gets to link back to the call.
+    sourceUrl: object.share_url,
     text: `${object.topic}\n\n${text}`,
     occurredAt: object.start_time.slice(0, 10),
   });
