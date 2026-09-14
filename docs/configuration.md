@@ -31,6 +31,8 @@ everything else can wait until you're through the wizard:
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` / `GOOGLE_WORKSPACE_IMPERSONATE_EMAIL` | no | Enables the Google Meet connector |
 | `INTERCOM_ACCESS_TOKEN` / `INTERCOM_CLIENT_SECRET` | no | Enables the Intercom connector |
 | `ZENDESK_SUBDOMAIN` / `ZENDESK_EMAIL` / `ZENDESK_API_TOKEN` / `ZENDESK_WEBHOOK_SECRET` | no | Enables the Zendesk connector |
+| `INTERCOM_APP_ID` | no | Not a credential — the workspace id in Intercom's URLs. Set it and every Intercom citation becomes a clickable link to the conversation |
+| `HUBSPOT_PORTAL_ID` | no | Not a credential — the portal id in every `app.hubspot.com` URL. Set it and HubSpot citations link to the note |
 | `HUBSPOT_ACCESS_TOKEN` | no | Enables the HubSpot connector |
 | `SALESFORCE_INSTANCE_URL` / `SALESFORCE_CLIENT_ID` / `SALESFORCE_CLIENT_SECRET` | no | Enables the Salesforce connector (OAuth2 client credentials) |
 | `ATTIO_API_KEY` | no | Enables the Attio connector |

@@ -52,10 +52,13 @@ export interface Env {
 
   /** Intercom support-conversation connector — see src/connectors/intercom.ts. */
   INTERCOM_ACCESS_TOKEN?: string;
+  /** Not a credential — the workspace id in Intercom's own URLs. Set it and
+   * every Intercom citation becomes a link to the conversation. */
+  INTERCOM_APP_ID?: string;
   INTERCOM_CLIENT_SECRET?: string; // signs webhook deliveries
 
   /** Zendesk support-ticket connector — see src/connectors/zendesk.ts. */
-  ZENDESK_SUBDOMAIN?: string; // "yourcompany" in yourcompany.zendesk.com
+  ZENDESK_SUBDOMAIN?: string; // "yourcompany" in yourcompany.zendesk.com — also what makes Zendesk citations linkable
   ZENDESK_EMAIL?: string; // agent/admin email the API token belongs to
   ZENDESK_API_TOKEN?: string;
   ZENDESK_WEBHOOK_SECRET?: string; // shared secret you choose, same pattern as Fireflies
@@ -63,6 +66,9 @@ export interface Env {
   /** HubSpot CRM notes/engagements connector (nightly backfill, like
    * Google Meet — see src/connectors/hubspot.ts). */
   HUBSPOT_ACCESS_TOKEN?: string; // private app token
+  /** Not a credential — the portal/hub id in every app.hubspot.com URL.
+   * Set it and HubSpot citations link to the note. */
+  HUBSPOT_PORTAL_ID?: string;
 
   /** Salesforce CRM connector — logged calls/emails/meetings (Task records)
    * against an Account. OAuth2 client-credentials, so all three are needed:

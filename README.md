@@ -63,10 +63,13 @@ Sources:
 • intercom · 2026-08-22: "SSO cert expired, blocking new logins for..."
 ```
 
-Those citations are the point. Bellwether answers only from what it actually
-retrieved out of your call transcripts, tickets and CRM notes — and when
-nothing relevant has been ingested, it says so instead of writing something
-plausible.
+Those citations are the point, and **each one links back to the record it
+came from** — the actual Zoom recording, the actual Intercom conversation,
+the actual Salesforce task. You can open the evidence and disagree with it
+mid-call. Bellwether answers only from what it actually retrieved, and when
+nothing relevant has been ingested it says so instead of writing something
+plausible. Where a source has no linkable record, the citation stays plain
+text rather than pointing at a 404 — [how that resolves](docs/connectors.md#following-a-citation-back-to-the-record).
 
 ## Why it exists
 

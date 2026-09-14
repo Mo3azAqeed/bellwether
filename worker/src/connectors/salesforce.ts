@@ -126,6 +126,10 @@ export async function backfillRecentSalesforce(env: Env): Promise<void> {
   // One extra query for every account mentioned, rather than one per task —
   // Website is what resolves a Salesforce account to a Bellwether one.
   const accountIds = [...new Set(tasks.records.map((t) => t.AccountId).filter((id): id is string => !!id))];
+  // The SOQL above filters AccountId != null, so this should be unreachable —
+  // but `WHERE Id IN ()` is malformed and would throw, taking the whole run
+  // with it rather than just skipping a task.
+  if (!accountIds.length) return;
   const idList = accountIds.map((id) => `'${id.replace(/'/g, "")}'`).join(", ");
   const accounts = await soql<SalesforceAccount>(apiHost, token, `SELECT Id, Name, Website FROM Account WHERE Id IN (${idList})`);
   const accountById = new Map(accounts.records.map((a) => [a.Id, a]));

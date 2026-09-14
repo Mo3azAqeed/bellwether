@@ -152,3 +152,38 @@ rather than a promise:
   compares each account's new tier against its previous one and posts to
   Slack on any change (up or down) — there's an example of that message
   in the [README](../README.md).
+
+## Following a citation back to the record
+
+Every answer cites what it was built from, and each citation links to the
+original wherever Bellwether can work out where that is. "Their admin
+champion left in August" stops being a claim you have to take on faith and
+becomes a Zoom recording you can open mid-call.
+
+A link is found two ways, in this order:
+
+1. **The URL the connector captured at ingest.** Some webhooks hand one over
+   — Zoom's `share_url` is the recording's own page — and the vendor's URL is
+   always the right one. It's stored on the chunk in `source_url`.
+2. **Derived from the record id plus workspace config already on file.**
+
+| Source | Links to | Needs |
+|---|---|---|
+| Fireflies | The transcript in Fireflies | nothing |
+| Zendesk | The ticket in the agent view | `ZENDESK_SUBDOMAIN` (already set for the connector) |
+| Salesforce | The Task in Lightning | `SALESFORCE_INSTANCE_URL` (already set for the connector) |
+| Intercom | The conversation | `INTERCOM_APP_ID` — optional, link-only |
+| HubSpot | The note on the record | `HUBSPOT_PORTAL_ID` — optional, link-only |
+| Zoom | The recording | Nothing, when the recording is shareable — Zoom sends the URL |
+| Google Meet, Attio | — | No id-to-URL rule that holds; they'd need a captured URL |
+| `POST /ingest` | — | Pass a URL as the `sourceRef` and it becomes the link |
+
+Anything else renders as plain text with no link. That is deliberate: a link
+to a 404 is worse than no link, because it claims evidence exists and then
+can't produce it. If a source you care about isn't linkable, open an issue —
+most cases are one URL template away.
+
+**Existing deployments need the migration.** `source_url` arrived in
+`0004_source_url.sql`; run `npm run db:migrate:remote` after pulling. Chunks
+ingested before it simply have no captured URL and fall back to a derived
+link where one is possible.

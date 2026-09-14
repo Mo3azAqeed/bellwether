@@ -33,6 +33,7 @@ export interface ChunkRow {
   account_id: string;
   source: string;
   source_ref: string | null;
+  source_url: string | null;
   chunk_text: string;
   occurred_at: string | null;
 }
@@ -43,6 +44,8 @@ export interface ContextDocument {
   source: string;
   sourceRef: string | null;
   occurredAt: string | null;
+  /** Link back to the record in the system it came from, when there is one. */
+  sourceUrl: string | null;
   text: string;
   chunkCount: number;
 }
@@ -77,12 +80,14 @@ export function groupChunks(rows: ChunkRow[]): ContextDocument[] {
       existing.text += `\n\n${row.chunk_text}`;
       existing.chunkCount += 1;
       existing.occurredAt ??= row.occurred_at;
+      existing.sourceUrl ??= row.source_url;
     } else {
       byKey.set(key, {
         key,
         source: row.source,
         sourceRef: row.source_ref,
         occurredAt: row.occurred_at,
+        sourceUrl: row.source_url,
         text: row.chunk_text,
         chunkCount: 1,
       });
@@ -132,6 +137,7 @@ export function renderDocumentMarkdown(
       account_id: account.account_id,
       source: doc.source,
       source_ref: doc.sourceRef,
+      source_url: doc.sourceUrl,
       occurred_at: doc.occurredAt,
       generated_at: generatedAt,
     }),
@@ -216,7 +222,8 @@ export function renderAccountMarkdown(
 
     const dated = [...documents].sort((a, b) => (b.occurredAt ?? "").localeCompare(a.occurredAt ?? ""));
     for (const doc of dated.slice(0, 20)) {
-      lines.push(`- [${doc.occurredAt ?? "undated"} · ${doc.source}](notes/${documentFilename(doc)})`);
+      const original = doc.sourceUrl ? ` — [open in ${doc.source}](${doc.sourceUrl})` : "";
+      lines.push(`- [${doc.occurredAt ?? "undated"} · ${doc.source}](notes/${documentFilename(doc)})${original}`);
     }
     if (dated.length > 20) lines.push(`- …and ${dated.length - 20} more in \`notes/\``);
     lines.push("");

@@ -1,0 +1,13 @@
+-- Traceability: a link back to the record a chunk came from.
+--
+-- Citations used to be text ("intercom · 2026-08-22: ...excerpt..."), which
+-- tells you a ticket exists but not which one. This column holds the URL of
+-- the original record so an answer can be opened, read in full, and argued
+-- with.
+--
+-- Nullable on purpose. Some sources hand us a URL in their webhook payload
+-- (Zoom's share_url), some can have one derived from an id plus workspace
+-- config (Zendesk, Salesforce, Fireflies, Intercom, HubSpot), and some —
+-- a pasted export through POST /ingest — have no record to link to at all.
+-- An honest null renders as no link rather than a broken one.
+ALTER TABLE context_chunks ADD COLUMN source_url TEXT;
