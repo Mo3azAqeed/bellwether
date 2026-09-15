@@ -1,5 +1,7 @@
 import type { DbAccount } from "../db.js";
 import type { HealthSnapshot } from "../baseline.js";
+import { recentLines, type RecentDocument } from "../rag/recent.js";
+import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation.js";
 import type { RetrievedChunk } from "../rag/retrieve.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
@@ -25,7 +27,7 @@ function summaryLine(h: HealthSnapshot): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): any[] {
+export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot, recent: RecentDocument[] = []): any[] {
   const renewalText =
     health.renewalDaysOut >= 0
       ? `in ${health.renewalDaysOut} days`
@@ -52,6 +54,21 @@ export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): 
         { type: "mrkdwn", text: `*Owner*\n${ownerText}` },
       ],
     },
+    // Usage says the account is fine; the last ticket may say otherwise.
+    // Both belong on the same card, or the card gets believed too easily.
+    ...(recent.length
+      ? [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Lately*\n${recentLines(recent, (label, url) => `<${url}|${label}>`)
+                .map((line) => `• ${line}`)
+                .join("\n")}`,
+            },
+          },
+        ]
+      : []),
     {
       type: "actions",
       elements: [
@@ -108,7 +125,12 @@ export function buildAlertBlocks(account: DbAccount, previousTier: HealthSnapsho
 /** Renders a grounded answer plus the source chunks it was built from, so
  * the reader can check the citation rather than trust the model blindly. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAnswerBlocks(accountName: string, answer: string, sources: RetrievedChunk[]): any[] {
+export function buildAnswerBlocks(
+  accountName: string,
+  answer: string,
+  sources: RetrievedChunk[],
+  traceId?: string
+): any[] {
   const blocks: any[] = [
     {
       type: "section",
@@ -117,15 +139,10 @@ export function buildAnswerBlocks(accountName: string, answer: string, sources: 
   ];
 
   if (sources.length > 0) {
-    const sourceLines = sources
-      .map((s) => {
-        // Slack link syntax when we know where the record lives, plain
-        // italics when we don't — never a link that goes nowhere.
-        const label = `${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}`;
-        const head = s.url ? `<${s.url}|${label}>` : `_${label}_`;
-        return `• ${head}: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`;
-      })
-      .join("\n");
+    // Numbered to match the [n] markers in the answer: the model was handed
+    // these notes in this order, so "[2]" has to point at the second entry
+    // here or the citation is decorative.
+    const sourceLines = citationLines(buildCitations(sources), (label, url) => `<${url}|${label}>`).join("\n\n");
     blocks.push({
       type: "context",
       elements: [{ type: "mrkdwn", text: `Sources:\n${sourceLines}` }],
@@ -134,6 +151,39 @@ export function buildAnswerBlocks(accountName: string, answer: string, sources: 
     blocks.push({
       type: "context",
       elements: [{ type: "mrkdwn", text: "No ingested notes for this account yet — this is usage data only." }],
+    });
+  }
+
+  // A fabricated customer quote read aloud on a renewal call is the worst
+  // thing this product can do, so say when one can't be found in the notes
+  // rather than letting it pass as verified.
+  const unverified = unverifiedQuotes(answer, sources);
+  if (unverified.length) {
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `:warning: ${unverified.length === 1 ? "A quote in this answer isn't" : `${unverified.length} quotes in this answer aren't`} in the notes above — treat ${unverified.length === 1 ? "it" : "them"} as the model's wording, not the customer's.`,
+        },
+      ],
+    });
+  }
+
+  // Citations say which records were used. This says why those records —
+  // the scores retrieval assigned and the model that answered. When a
+  // grounded answer is wrong it is almost always the former.
+  if (traceId) {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "How did it get this?" },
+          action_id: "explain_answer",
+          value: traceId,
+        },
+      ],
     });
   }
 

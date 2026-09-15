@@ -6,7 +6,7 @@ The same context layer that answers `@Bell` in Slack or Teams is also
 reachable over [MCP](https://modelcontextprotocol.io) (Model Context
 Protocol) — so a Customer Success Engineer already living in Claude Code,
 Cursor, Codex, or OpenCode can ask about an account without switching to
-Slack. Four tools, callable by the agent's model instead of triggered by a
+Slack. Six tools, callable by the agent's model instead of triggered by a
 mention:
 
 | Tool | What it does | Server-side model cost |
@@ -15,6 +15,8 @@ mention:
 | `get_account_health` | Usage against the account's own baseline, tier, renewal | none |
 | `get_account_context` | Returns the raw matching excerpts — transcripts, tickets, CRM notes — verbatim, no summarization | none |
 | `ask_about_account` | The RAG "why" flow: retrieves, then has a model answer from only what it found, with citations | one short call |
+| `get_account_timeline` | Everything known about an account on one axis: source records with a link into each original, the readings where the tier moved, and every answer Bell has given | none |
+| `explain_answer` | How a previous answer was built — which excerpts retrieval picked, how each scored, which model answered, optionally the literal prompt | none |
 
 ```bash
 npx wrangler secret put MCP_ACCESS_TOKEN   # pick any strong random string

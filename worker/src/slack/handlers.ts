@@ -1,7 +1,10 @@
 import type { Env } from "../env.js";
-import { getAccountById, setOwnerSlackId, getLatestSnapshot } from "../db.js";
+import { getAccountById, setOwnerSlackId, getLatestSnapshot, findAccountByName, allDbAccounts } from "../db.js";
 import { resolveMention, resolveQuestion, type MentionResolution } from "../bot-logic.js";
 import { buildAccountBlocks, buildAnswerBlocks } from "./blocks.js";
+import { getAnswerTrace, renderTrace } from "../rag/trace.js";
+import { buildTimeline } from "../timeline/data.js";
+import { renderTimelineText } from "../timeline/render.js";
 import { postMessage, openView, respondToInteraction } from "./api.js";
 
 function stripMention(text: string): string {
@@ -29,7 +32,7 @@ async function sendResolution(env: Env, channel: string, threadTs: string | unde
         channel,
         thread_ts: threadTs,
         text: `${resolution.account.name} health summary`,
-        blocks: buildAccountBlocks(resolution.account, resolution.health),
+        blocks: buildAccountBlocks(resolution.account, resolution.health, resolution.recent),
       });
       return;
     case "health_error":
@@ -44,7 +47,7 @@ async function sendResolution(env: Env, channel: string, threadTs: string | unde
         channel,
         thread_ts: threadTs,
         text: `${resolution.account.name}: ${resolution.answer}`,
-        blocks: buildAnswerBlocks(resolution.account.name, resolution.answer, resolution.chunks),
+        blocks: buildAnswerBlocks(resolution.account.name, resolution.answer, resolution.chunks, resolution.traceId),
       });
       return;
     case "question_error":
@@ -136,7 +139,7 @@ export async function handleBlockAction(env: Env, payload: any) {
     if (resolution.kind === "question") {
       await respondToInteraction(responseUrl, {
         text: `${account.name}: ${resolution.answer}`,
-        blocks: buildAnswerBlocks(account.name, resolution.answer, resolution.chunks),
+        blocks: buildAnswerBlocks(account.name, resolution.answer, resolution.chunks, resolution.traceId),
         replace_original: false,
       });
     } else {
@@ -145,6 +148,17 @@ export async function handleBlockAction(env: Env, payload: any) {
         replace_original: false,
       });
     }
+  }
+
+  if (action.action_id === "explain_answer") {
+    // The button's value is the trace id, not an account id.
+    const trace = await getAnswerTrace(env, action.value);
+    await respondToInteraction(responseUrl, {
+      text: trace
+        ? renderTrace(trace)
+        : "That answer's trace has expired — traces are kept for 30 days by default.",
+      replace_original: false,
+    });
   }
 }
 
@@ -167,4 +181,29 @@ export async function handleViewSubmission(env: Env, payload: any) {
       text: `Assigned ${account?.name ?? accountId} to <@${selectedUserId}> — they've been notified.`,
     });
   }
+}
+
+/** `/timeline Northwind` — the account's history as a reply in the channel,
+ * so checking where a claim came from doesn't mean leaving Slack. Posted
+ * ephemerally: it's verbatim customer conversation, and the person who
+ * asked is the one who should see it, not everyone scrolling past.
+ *
+ * Slack caps a message at 3000 characters per text block, so this shows the
+ * newest entries and says how many it left out rather than being silently
+ * truncated by Slack. */
+export async function handleTimelineCommand(env: Env, accountQuery: string): Promise<string> {
+  const query = accountQuery.trim();
+  if (!query) return "Which account? Try `/timeline Northwind`.";
+
+  const account = await findAccountByName(env.DB, query);
+  if (!account) {
+    const names = (await allDbAccounts(env.DB)).slice(0, 5).map((a) => a.name);
+    return `No account matching "${query}".${names.length ? ` Try one of: ${names.join(", ")}.` : ""}`;
+  }
+
+  const timeline = await buildTimeline(env, account.account_id, 12);
+  if (!timeline) return `No account matching "${query}".`;
+
+  const text = renderTimelineText(timeline, { link: (label, url) => `<${url}|${label}>`, limit: 12 });
+  return text.length > 2900 ? `${text.slice(0, 2900).trimEnd()}\n\n…trimmed to fit a Slack message.` : text;
 }

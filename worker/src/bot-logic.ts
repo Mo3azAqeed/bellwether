@@ -9,14 +9,25 @@ import type { Env } from "./env.js";
 import { findAccountByName, allDbAccounts, recordHealthSnapshot, type DbAccount } from "./db.js";
 import { computeHealth, type HealthSnapshot } from "./baseline.js";
 import { retrieveContext, type RetrievedChunk } from "./rag/retrieve.js";
+import { recentContext, type RecentDocument } from "./rag/recent.js";
 import { generateAnswer } from "./rag/generate.js";
+import { recordAnswerTrace } from "./rag/trace.js";
 
 export type MentionResolution =
   | { kind: "empty" }
   | { kind: "account_not_found"; query: string; sampleNames: string[] }
-  | { kind: "health"; account: DbAccount; health: HealthSnapshot }
+  | { kind: "health"; account: DbAccount; health: HealthSnapshot; recent: RecentDocument[] }
   | { kind: "health_error"; account: DbAccount }
-  | { kind: "question"; account: DbAccount; question: string; answer: string; chunks: RetrievedChunk[] }
+  | {
+      kind: "question";
+      account: DbAccount;
+      question: string;
+      answer: string;
+      chunks: RetrievedChunk[];
+      /** Looks up the full derivation later. Undefined only if the trace
+       * couldn't be written — the answer never waits on bookkeeping. */
+      traceId?: string;
+    }
   | { kind: "question_error"; account: DbAccount }
   | { kind: "unresolved_question"; question: string };
 
@@ -74,14 +85,43 @@ export async function resolveHealth(env: Env, accountQuery: string): Promise<Men
   }
 
   await recordHealthSnapshot(env.DB, account.account_id, health.avgActiveSeats, health.baselineDeltaPct, health.tier);
-  return { kind: "health", account, health };
+
+  // The numbers are the answer; what was said lately is the context that
+  // stops the numbers being misread. Never worth failing the whole reply
+  // over — a health card without it is still a health card.
+  let recent: RecentDocument[] = [];
+  try {
+    recent = await recentContext(env, account.account_id);
+  } catch (err) {
+    console.error("recentContext failed", err);
+  }
+
+  return { kind: "health", account, health, recent };
 }
 
 export async function resolveQuestion(env: Env, account: DbAccount, question: string): Promise<MentionResolution> {
   try {
+    const retrievalStart = Date.now();
     const chunks = await retrieveContext(env, account.account_id, question);
-    const answer = await generateAnswer(env, account.name, question, chunks);
-    return { kind: "question", account, question, answer, chunks };
+    const retrievalMs = Date.now() - retrievalStart;
+
+    const generationStart = Date.now();
+    const generated = await generateAnswer(env, account.name, question, chunks);
+    const generationMs = Date.now() - generationStart;
+
+    const traceId = await recordAnswerTrace(env, {
+      accountId: account.account_id,
+      question,
+      answer: generated.text,
+      provider: generated.provider,
+      model: generated.model,
+      prompt: generated.prompt,
+      chunks,
+      retrievalMs,
+      generationMs,
+    });
+
+    return { kind: "question", account, question, answer: generated.text, chunks, traceId };
   } catch (err) {
     console.error("retrieveContext/generateAnswer failed", err);
     return { kind: "question_error", account };

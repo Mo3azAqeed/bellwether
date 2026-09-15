@@ -27,13 +27,30 @@ function buildPrompt(accountName: string, question: string, chunks: RetrievedChu
   return [
     `You're answering a customer success question about the account "${accountName}".`,
     `Answer only from the notes below — if they don't cover it, say so plainly instead of guessing.`,
-    `Cite sources inline like [1]. Keep it to 2-4 sentences.`,
+    `Keep it to 2-4 sentences.`,
+    ``,
+    `Every claim must be checkable, so cite like this:`,
+    `  - Put the note's number in square brackets after the claim, like [2].`,
+    `  - Immediately before the bracket, quote the words from that note that`,
+    `    justify the claim — verbatim, in double quotes, 15 words at most.`,
+    `  - Quote what was actually written. Never paraphrase inside quote marks,`,
+    `    and never quote words that don't appear in the note.`,
+    `Example: Their admin left in August — "our admin Sarah actually left the company last month" [2].`,
     ``,
     `Notes:`,
     context,
     ``,
     `Question: ${question}`,
   ].join("\n");
+}
+
+/** What answered, and what it was asked — the raw material for a trace.
+ * Returned rather than logged so the caller decides whether to persist it. */
+export interface GeneratedAnswer {
+  text: string;
+  provider: "workers-ai" | "openrouter" | "anthropic";
+  model: string;
+  prompt: string;
 }
 
 async function generateWithWorkersAI(env: Env, prompt: string): Promise<string> {
@@ -93,14 +110,27 @@ export async function generateAnswer(
   accountName: string,
   question: string,
   chunks: RetrievedChunk[]
-): Promise<string> {
+): Promise<GeneratedAnswer> {
   const prompt = buildPrompt(accountName, question, chunks);
   const [anthropicKey, openRouterKey, openRouterModel] = await Promise.all([
     getSetting(env, "ANTHROPIC_API_KEY"),
     getSetting(env, "OPENROUTER_API_KEY"),
     getSetting(env, "OPENROUTER_MODEL"),
   ]);
-  if (anthropicKey) return generateWithAnthropic(anthropicKey, prompt);
-  if (openRouterKey) return generateWithOpenRouter(openRouterKey, openRouterModel, prompt);
-  return generateWithWorkersAI(env, prompt);
+
+  // Which model answered is part of the answer's provenance: the same
+  // question routed to Workers AI and to Haiku can come back different, and
+  // "which one was this?" is the first question when one of them is wrong.
+  if (anthropicKey) {
+    return { text: await generateWithAnthropic(anthropicKey, prompt), provider: "anthropic", model: ANTHROPIC_MODEL, prompt };
+  }
+  if (openRouterKey) {
+    return {
+      text: await generateWithOpenRouter(openRouterKey, openRouterModel, prompt),
+      provider: "openrouter",
+      model: openRouterModel || DEFAULT_OPENROUTER_MODEL,
+      prompt,
+    };
+  }
+  return { text: await generateWithWorkersAI(env, prompt), provider: "workers-ai", model: WORKERS_AI_MODEL, prompt };
 }

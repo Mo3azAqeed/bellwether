@@ -5,19 +5,29 @@
   },
   "display_information": {
     "name": "Bellwether",
-    "description": "An open-source AI context layer for customer success — tells you when an account is about to walk away, and why."
+    "description": "An open-source AI context layer for customer success \u2014 tells you when an account is about to walk away, and why."
   },
   "features": {
     "bot_user": {
       "display_name": "Bell",
       "always_online": true
-    }
+    },
+    "slash_commands": [
+      {
+        "command": "/timeline",
+        "url": "https://REPLACE-WITH-YOUR-WORKER.workers.dev/slack/commands",
+        "description": "Where every piece of an account's context came from, newest first",
+        "usage_hint": "[account name]",
+        "should_escape": false
+      }
+    ]
   },
   "oauth_config": {
     "scopes": {
       "bot": [
         "app_mentions:read",
-        "chat:write"
+        "chat:write",
+        "commands"
       ]
     }
   },

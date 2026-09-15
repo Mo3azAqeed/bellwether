@@ -16,6 +16,11 @@ import type { Env } from "../env.js";
 import { allDbAccounts, findAccountByName } from "../db.js";
 import { resolveHealth, resolveQuestion } from "../bot-logic.js";
 import { retrieveContext } from "../rag/retrieve.js";
+import { recentLines } from "../rag/recent.js";
+import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation.js";
+import { getAnswerTrace, latestAnswerTrace, renderTrace } from "../rag/trace.js";
+import { buildTimeline } from "../timeline/data.js";
+import { renderTimelineText } from "../timeline/render.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -93,6 +98,41 @@ export const TOOLS: ToolDef[] = [
       required: ["account", "topic"],
     },
   },
+  {
+    name: "get_account_timeline",
+    description:
+      "Everything known about an account on one axis: time. Source records (calls, tickets, CRM notes) with a link into each original, the readings where the health tier actually moved, and the questions Bell has been asked with what it built each answer from. Use it before a call, or whenever the question is 'what has actually been happening here' rather than one specific thing. Costs nothing; reads stored rows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string", description: "Account name or a close match." },
+        limit: { type: "number", description: "How many entries to return, newest first (default 25, max 100)." },
+      },
+      required: ["account"],
+    },
+  },
+  {
+    name: "explain_answer",
+    description:
+      "Show how a previous ask_about_account answer was built: which excerpts retrieval picked and how strongly each scored, which provider and model answered, how long each step took, and optionally the literal prompt that was sent. Use it when an answer looks wrong or surprising — the cause is usually retrieval picking the wrong evidence, which the answer text alone never shows. Costs nothing; reads stored rows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        trace_id: {
+          type: "string",
+          description: "The trace id printed under an ask_about_account answer. Omit it and pass account instead to get that account's most recent answer.",
+        },
+        account: {
+          type: "string",
+          description: "Account name — returns the most recent answer for it. Ignored when trace_id is given.",
+        },
+        include_prompt: {
+          type: "boolean",
+          description: "Include the exact prompt sent to the model. Long; useful when the retrieved excerpts look right but the answer doesn't.",
+        },
+      },
+    },
+  },
 ];
 
 function textResult(text: string, isError = false): ToolContent {
@@ -128,8 +168,17 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
           const h = resolution.health;
           const tierLabel = h.tier === "at_risk" ? "at risk" : h.tier;
           const delta = h.baselineDeltaPct >= 0 ? `+${h.baselineDeltaPct}` : `${h.baselineDeltaPct}`;
+          const headline = `${resolution.account.name}: ${tierLabel}. ${h.avgActiveSeats} of ${h.seatsPurchased} seats active (${delta}% vs its own baseline), renews in ${h.renewalDaysOut} days. Owner: ${resolution.account.csm_owner_name ?? "unassigned"}.`;
+          // The tier is usage only. Handing back the last few things on file
+          // alongside it is what stops an agent reporting "healthy" on the
+          // morning of an angry ticket.
+          const lately = recentLines(resolution.recent, (label, url) => `${label} — ${url}`)
+            .map((line) => `- ${line}`)
+            .join("\n");
           return textResult(
-            `${resolution.account.name}: ${tierLabel}. ${h.avgActiveSeats} of ${h.seatsPurchased} seats active (${delta}% vs its own baseline), renews in ${h.renewalDaysOut} days. Owner: ${resolution.account.csm_owner_name ?? "unassigned"}.`
+            lately
+              ? `${headline}\n\nLately (most recent first, independent of the tier):\n${lately}`
+              : `${headline}\n\nNothing ingested for this account yet, so the tier is the only signal here.`
           );
         }
         default:
@@ -150,15 +199,18 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         case "question_error":
           return textResult(`Couldn't retrieve an answer for ${account.name} right now.`, true);
         case "question": {
-          // The URL is the point of a citation inside a coding agent: the
-          // agent can open it, and so can the person reading over its shoulder.
-          const sources = resolution.chunks
-            .map(
-              (c, i) =>
-                `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""}${c.url ? `\n    ${c.url}` : ""}`
-            )
-            .join("\n");
-          return textResult(`${resolution.answer}${sources ? `\n\nSources:\n${sources}` : ""}`);
+          // Numbered to match the [n] markers in the answer, with the record's
+          // own words and a URL the agent — or the person reading over its
+          // shoulder — can open.
+          const sources = citationLines(buildCitations(resolution.chunks), (label, url) => `${label} — ${url}`).join("\n\n");
+          const unverified = unverifiedQuotes(resolution.answer, resolution.chunks);
+          const warning = unverified.length
+            ? `\n\n⚠️ Not found verbatim in the notes: ${unverified.map((q) => `“${q}”`).join("; ")}. Treat as the model's wording, not the customer's.`
+            : "";
+          const trace = resolution.traceId
+            ? `\n\nTrace ${resolution.traceId} — call explain_answer with this id to see which excerpts were retrieved, how they scored, and which model answered.`
+            : "";
+          return textResult(`${resolution.answer}${warning}${sources ? `\n\nSources:\n${sources}` : ""}${trace}`);
         }
         default:
           return textResult("Unexpected error answering the question.", true);
@@ -198,6 +250,48 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         )
         .join("\n\n");
       return textResult(`${chunks.length} excerpt(s) from ${account.name}'s history, most relevant first:\n\n${excerpts}`);
+    }
+
+    case "get_account_timeline": {
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      if (!accountQuery) return textResult("account is required.", true);
+
+      const account = await findAccountByName(env.DB, accountQuery);
+      if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+
+      const requested = typeof args.limit === "number" ? args.limit : 25;
+      const limit = Math.max(1, Math.min(100, Math.floor(requested)));
+
+      const timeline = await buildTimeline(env, account.account_id, limit);
+      if (!timeline) return textResult(`No account matching "${accountQuery}".`, true);
+
+      return textResult(renderTimelineText(timeline, { limit }));
+    }
+
+    case "explain_answer": {
+      const traceId = typeof args.trace_id === "string" ? args.trace_id.trim() : "";
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      const includePrompt = args.include_prompt === true;
+
+      if (!traceId && !accountQuery) return textResult("Pass either trace_id or account.", true);
+
+      let trace;
+      if (traceId) {
+        trace = await getAnswerTrace(env, traceId);
+        if (!trace) {
+          return textResult(
+            `No trace ${traceId}. Traces expire on a retention window (30 days by default), so an older answer may no longer have one.`,
+            true
+          );
+        }
+      } else {
+        const account = await findAccountByName(env.DB, accountQuery);
+        if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+        trace = await latestAnswerTrace(env, account.account_id);
+        if (!trace) return textResult(`No questions have been answered about ${account.name} yet.`);
+      }
+
+      return textResult(renderTrace(trace, { includePrompt }));
     }
 
     default:

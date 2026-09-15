@@ -1,6 +1,6 @@
 import type { Env } from "./env.js";
 import { verifySlackRequest } from "./slack/verify.js";
-import { handleAppMention, handleBlockAction, handleViewSubmission } from "./slack/handlers.js";
+import { handleAppMention, handleBlockAction, handleViewSubmission, handleTimelineCommand } from "./slack/handlers.js";
 import { ingestDocument, type IngestInput } from "./rag/ingest.js";
 import { allDbAccounts, recordHealthSnapshot, getLatestSnapshot } from "./db.js";
 import { computeHealth, type HealthSnapshot } from "./baseline.js";
@@ -12,10 +12,12 @@ import { ingestZendeskTicket } from "./connectors/zendesk.js";
 import { backfillRecentHubSpot } from "./connectors/hubspot.js";
 import { backfillRecentSalesforce } from "./connectors/salesforce.js";
 import { backfillRecentAttio } from "./connectors/attio.js";
+import { pruneAnswerTraces } from "./rag/trace.js";
 import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
 import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
+import { handleTimelinePage, handleTimelineAccounts, handleTimelineEvents } from "./timeline/handlers.js";
 import { verifyTeamsAuth } from "./teams/verify.js";
 import { handleTeamsActivity, type TeamsActivity } from "./teams/handlers.js";
 import { handleMcpRequest } from "./mcp/server.js";
@@ -268,6 +270,37 @@ async function handleMcp(req: Request, env: Env): Promise<Response> {
   return handleMcpRequest(req, env);
 }
 
+/** Slash commands arrive form-encoded, not JSON, and Slack shows whatever
+ * we return within 3 seconds. A timeline is two indexed queries, so it
+ * answers inline rather than going through the deferred response_url dance
+ * the mention path needs. */
+async function handleSlackCommand(req: Request, env: Env): Promise<Response> {
+  const rawBody = await req.text();
+  const ok = await verifySlackRequest(
+    env.SLACK_SIGNING_SECRET,
+    req.headers.get("x-slack-request-timestamp"),
+    req.headers.get("x-slack-signature"),
+    rawBody
+  );
+  if (!ok) return new Response("invalid signature", { status: 401 });
+
+  const form = new URLSearchParams(rawBody);
+  const command = form.get("command") ?? "";
+  if (command !== "/timeline") {
+    return json({ response_type: "ephemeral", text: `Unknown command ${command}.` });
+  }
+
+  try {
+    const text = await handleTimelineCommand(env, form.get("text") ?? "");
+    // Ephemeral: this is verbatim customer conversation, and the person who
+    // asked is the one who needs it — not everyone scrolling the channel.
+    return json({ response_type: "ephemeral", text });
+  } catch (err) {
+    console.error("/timeline failed", err);
+    return json({ response_type: "ephemeral", text: "Couldn't build that timeline right now." });
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -277,6 +310,9 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/slack/interactions") {
       return handleSlackInteractions(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/slack/commands") {
+      return handleSlackCommand(req, env);
     }
     if (req.method === "POST" && url.pathname === "/ingest") {
       return handleIngest(req, env);
@@ -303,6 +339,16 @@ export default {
       // streams, so it declines both rather than pretending to support them.
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
     }
+    if (req.method === "GET" && url.pathname === "/timeline") {
+      return handleTimelinePage(req, env);
+    }
+    if (req.method === "GET" && url.pathname === "/timeline/api/accounts") {
+      return handleTimelineAccounts(req, env);
+    }
+    if (req.method === "GET" && url.pathname === "/timeline/api/events") {
+      return handleTimelineEvents(req, env);
+    }
+
     if (req.method === "GET" && url.pathname === "/setup") {
       return handleSetupPage(env);
     }
@@ -380,6 +426,18 @@ export default {
       await backfillRecentAttio(env);
     } catch (err) {
       console.error("attio backfill failed", err);
+    }
+
+    // Answer traces hold a second copy of customer text. They earn their
+    // keep for as long as someone might ask how an answer was reached, and
+    // become a liability after that.
+    try {
+      const configured = await getSetting(env, "ANSWER_TRACE_RETENTION_DAYS");
+      const days = Number(configured);
+      const deleted = await pruneAnswerTraces(env, Number.isFinite(days) && days > 0 ? days : undefined);
+      if (deleted) console.log(`pruned ${deleted} expired answer trace(s)`);
+    } catch (err) {
+      console.error("answer trace pruning failed", err);
     }
   },
 } satisfies ExportedHandler<Env>;
