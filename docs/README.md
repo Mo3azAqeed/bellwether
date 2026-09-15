@@ -11,6 +11,7 @@ because that's the only way it runs.
 | **[Context sources](connectors.md)** | Call transcripts, tickets and CRM notes: the eight built-in connectors, the generic ingest endpoint, and how fresh each one is |
 | **[Use it from your coding agent](mcp.md)** | MCP for Claude Code, Cursor, Codex and OpenCode — and who pays for which model call |
 | **[The context layer as files](context-files.md)** | Pull everything down as markdown you can read, grep and diff |
+| **[The account timeline](timeline.md)** | One page showing where every piece of an account's context came from, in order |
 | **[Configuration reference](configuration.md)** | Every variable, where it can be set, whether it's required |
 | **[Architecture](architecture.md)** | What each piece does, and where it lives in the repo |
 | **[Local development](development.md)** | Running it on your machine, and the conventions to follow when changing it |

@@ -17,6 +17,7 @@ import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
 import { handleSetupPage, handleSetupStatus, handleTestAndSave, handleSkip, handleSetFrequency, handleSetAlertsChannel } from "./setup/handlers.js";
+import { handleTimelinePage, handleTimelineAccounts, handleTimelineEvents } from "./timeline/handlers.js";
 import { verifyTeamsAuth } from "./teams/verify.js";
 import { handleTeamsActivity, type TeamsActivity } from "./teams/handlers.js";
 import { handleMcpRequest } from "./mcp/server.js";
@@ -304,6 +305,16 @@ export default {
       // streams, so it declines both rather than pretending to support them.
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
     }
+    if (req.method === "GET" && url.pathname === "/timeline") {
+      return handleTimelinePage(env);
+    }
+    if (req.method === "GET" && url.pathname === "/timeline/api/accounts") {
+      return handleTimelineAccounts(req, env);
+    }
+    if (req.method === "GET" && url.pathname === "/timeline/api/events") {
+      return handleTimelineEvents(req, env);
+    }
+
     if (req.method === "GET" && url.pathname === "/setup") {
       return handleSetupPage(env);
     }

@@ -15,7 +15,7 @@ right where your team already works.
 <p>
 <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-5468FF?style=flat-square"></a>
 <a href="docs/deploy.md"><img alt="Self-hosted" src="https://img.shields.io/badge/runs%20in-your%20own%20infrastructure-5468FF?style=flat-square"></a>
-<a href="#four-ways-to-ask"><img alt="Slack, Teams, MCP" src="https://img.shields.io/badge/Slack%20%7C%20Teams%20%7C%20MCP-5468FF?style=flat-square"></a>
+<a href="#five-ways-in"><img alt="Slack, Teams, MCP" src="https://img.shields.io/badge/Slack%20%7C%20Teams%20%7C%20MCP-5468FF?style=flat-square"></a>
 <a href="https://github.com/Mo3azAqeed/bellwether/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/Mo3azAqeed/bellwether?style=flat-square&color=5468FF&labelColor=1B1F3B"></a>
 </p>
 
@@ -121,10 +121,10 @@ Full walkthrough, including the Slack app and Teams bot: **[docs/deploy.md](docs
 > deploy, and walk you through the credentials it can't get on its own, the
 > way `dbt init` walks you through a project.
 
-## Four ways to ask
+## Five ways in
 
-Same brain behind all four — `src/bot-logic.ts` resolves the question once,
-so no two front ends can answer it differently.
+Same brain behind all of them — `src/bot-logic.ts` resolves the question
+once, so no two front ends can answer it differently.
 
 | Where | What it's for | Setup |
 |---|---|---|
@@ -132,6 +132,7 @@ so no two front ends can answer it differently.
 | **Microsoft Teams** | The same bot, same cards, for teams that don't live in Slack | [Deploy, step 6](docs/deploy.md) |
 | **Your coding agent** | Claude Code, Cursor, Codex and OpenCode reach the same context over MCP — four tools, three of which make no model call at all | [docs/mcp.md](docs/mcp.md) |
 | **Plain files** | `npm run context:pull` writes the whole context layer to markdown you can read, grep and diff | [docs/context-files.md](docs/context-files.md) |
+| **A timeline** | `/timeline` — one vertical axis showing where every piece of an account's context came from, and the answers Bell built from it | [docs/timeline.md](docs/timeline.md) |
 
 ## What it plugs into
 
@@ -206,6 +207,7 @@ system; nothing in it calls home.
 | [Context sources](docs/connectors.md) | Every connector, and how fresh each one is |
 | [Coding agents (MCP)](docs/mcp.md) | Claude Code, Cursor, Codex, OpenCode — and who pays for what |
 | [Context as files](docs/context-files.md) | The whole layer as markdown on disk |
+| [Account timeline](docs/timeline.md) | Where every piece of context came from, in order |
 | [Configuration](docs/configuration.md) | Every variable, and where it can be set |
 | [Architecture](docs/architecture.md) | What each piece does, and the repo layout |
 | [Local development](docs/development.md) | Running and changing it |
