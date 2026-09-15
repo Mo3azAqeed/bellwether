@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../env.js";
 
 vi.mock("../db.js", () => ({
@@ -12,6 +12,18 @@ vi.mock("../bot-logic.js", () => ({
 vi.mock("../rag/retrieve.js", () => ({
   retrieveContext: vi.fn(),
 }));
+vi.mock("../actions/store.js", () => ({
+  saveDraft: vi.fn(),
+  getDraft: vi.fn(),
+  listDrafts: vi.fn(),
+  markFiled: vi.fn(),
+  discardDraft: vi.fn(),
+}));
+vi.mock("../actions/tracker.js", () => ({
+  createTicket: vi.fn(),
+  resolveProvider: vi.fn(() => "linear"),
+  trackerConfig: vi.fn(async () => ({})),
+}));
 vi.mock("../rag/trace.js", () => ({
   getAnswerTrace: vi.fn(),
   latestAnswerTrace: vi.fn(),
@@ -22,6 +34,8 @@ const { allDbAccounts, findAccountByName } = await import("../db.js");
 const { resolveHealth, resolveQuestion } = await import("../bot-logic.js");
 const { retrieveContext } = await import("../rag/retrieve.js");
 const { getAnswerTrace, latestAnswerTrace, renderTrace } = await import("../rag/trace.js");
+const { saveDraft, getDraft, listDrafts, markFiled, discardDraft } = await import("../actions/store.js");
+const { createTicket } = await import("../actions/tracker.js");
 
 const fakeAccount = {
   account_id: "1",
@@ -57,7 +71,7 @@ describe("handleMcpRequest", () => {
     });
   });
 
-  it("lists all six tools with schemas", async () => {
+  it("lists all nine tools with schemas", async () => {
     const res = await handleMcpRequest(rpcRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }), fakeEnv);
     const body = await res.json();
     expect(body.result.tools).toEqual(TOOLS);
@@ -67,6 +81,9 @@ describe("handleMcpRequest", () => {
       "ask_about_account",
       "get_account_context",
       "get_account_timeline",
+      "draft_engineering_ticket",
+      "list_ticket_drafts",
+      "file_ticket_draft",
       "explain_answer",
     ]);
   });
@@ -347,5 +364,105 @@ describe("explain_answer", () => {
     const result = await callTool(fakeEnv, "explain_answer", { account: "Northwind" });
     expect(result.content[0].text).toContain("No questions have been answered");
     expect(result.isError).toBeFalsy();
+  });
+});
+
+/** The safety property this whole feature rests on: a ticket reaches Linear
+ * or Jira only when a human has read a stored draft and said to file it.
+ * These are the tests that would fail if someone "simplified" that away. */
+describe("ticket drafts", () => {
+  // Several of these assert that the tracker was NOT called, so call history
+  // has to start empty rather than carrying the previous test's filing.
+  beforeEach(() => vi.clearAllMocks());
+
+  it("saves a draft and files nothing", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(retrieveContext).mockResolvedValueOnce([
+      { id: "c1", source: "zendesk", sourceRef: "4412", url: "https://z/4412", occurredAt: "2026-09-06", chunkText: "SSO expired.", score: 0.8 },
+    ]);
+    vi.mocked(saveDraft).mockResolvedValueOnce("draft-1");
+
+    const result = await callTool(fakeEnv, "draft_engineering_ticket", { account: "Northwind", topic: "SSO expiry" });
+
+    expect(saveDraft).toHaveBeenCalledWith(fakeEnv, expect.objectContaining({ origin: "mcp", accountId: "1" }));
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("Nothing has been sent to any tracker");
+    expect(result.content[0].text).toContain("draft-1");
+  });
+
+  it("warns when a draft would carry no customer quotes", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(retrieveContext).mockResolvedValueOnce([]);
+    vi.mocked(saveDraft).mockResolvedValueOnce("draft-2");
+    const result = await callTool(fakeEnv, "draft_engineering_ticket", { account: "Northwind", topic: "anything" });
+    expect(result.content[0].text).toContain("would tell engineering very little");
+  });
+
+  it("refuses to file without a named approver", async () => {
+    vi.mocked(getDraft).mockResolvedValueOnce({
+      id: "draft-1", accountId: "1", accountName: "Northwind", title: "t", body: "b",
+      evidence: [], status: "pending", origin: "mcp", tracker: null, trackerKey: null, trackerUrl: null,
+      createdAt: "2026-09-15", decidedAt: null,
+    });
+    const result = await callTool(fakeEnv, "file_ticket_draft", { draft_id: "draft-1", action: "file" });
+    expect(result.isError).toBe(true);
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("approved_by is required");
+  });
+
+  it("files the stored text verbatim once approved", async () => {
+    vi.mocked(getDraft).mockResolvedValueOnce({
+      id: "draft-1", accountId: "1", accountName: "Northwind", title: "[Northwind] SSO expiry", body: "the reviewed body",
+      evidence: [], status: "pending", origin: "mcp", tracker: null, trackerKey: null, trackerUrl: null,
+      createdAt: "2026-09-15", decidedAt: null,
+    });
+    vi.mocked(createTicket).mockResolvedValueOnce({ provider: "linear", key: "ENG-412", url: "https://linear.app/x/ENG-412" });
+    vi.mocked(markFiled).mockResolvedValueOnce(true);
+
+    const result = await callTool(fakeEnv, "file_ticket_draft", { draft_id: "draft-1", action: "file", approved_by: "Maya" });
+
+    const filed = vi.mocked(createTicket).mock.calls.at(-1)?.[1];
+    expect(filed?.title).toBe("[Northwind] SSO expiry");
+    expect(filed?.summary).toContain("the reviewed body");
+    expect(filed?.summary).toContain("Approved by Maya");
+    expect(result.content[0].text).toContain("ENG-412");
+  });
+
+  it("won't file a draft that was already decided", async () => {
+    vi.mocked(getDraft).mockResolvedValueOnce({
+      id: "draft-1", accountId: "1", accountName: "Northwind", title: "t", body: "b",
+      evidence: [], status: "filed", origin: "mcp", tracker: "linear", trackerKey: "ENG-9", trackerUrl: "https://l/ENG-9",
+      createdAt: "2026-09-15", decidedAt: "2026-09-15",
+    });
+    const result = await callTool(fakeEnv, "file_ticket_draft", { draft_id: "draft-1", action: "file", approved_by: "Maya" });
+    expect(result.isError).toBe(true);
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("already filed");
+  });
+
+  it("discards without touching the tracker", async () => {
+    vi.mocked(getDraft).mockResolvedValueOnce({
+      id: "draft-3", accountId: "1", accountName: "Northwind", title: "t", body: "b",
+      evidence: [], status: "pending", origin: "scheduled", tracker: null, trackerKey: null, trackerUrl: null,
+      createdAt: "2026-09-15", decidedAt: null,
+    });
+    vi.mocked(discardDraft).mockResolvedValueOnce(true);
+    const result = await callTool(fakeEnv, "file_ticket_draft", { draft_id: "draft-3", action: "discard" });
+    expect(createTicket).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("discarded");
+  });
+
+  it("lists what's waiting on a human", async () => {
+    vi.mocked(listDrafts).mockResolvedValueOnce([
+      {
+        id: "draft-1", accountId: "1", accountName: "Northwind", title: "[Northwind] SSO expiry", body: "b",
+        evidence: [], status: "pending", origin: "scheduled", tracker: null, trackerKey: null, trackerUrl: null,
+        createdAt: "2026-09-15", decidedAt: null,
+      },
+    ]);
+    const result = await callTool(fakeEnv, "list_ticket_drafts", {});
+    expect(result.content[0].text).toContain("1 pending draft(s)");
+    expect(result.content[0].text).toContain("[Northwind] SSO expiry");
+    expect(result.content[0].text).toContain("via scheduled");
   });
 });

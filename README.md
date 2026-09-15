@@ -209,6 +209,7 @@ system; nothing in it calls home.
 | [Coding agents (MCP)](docs/mcp.md) | Claude Code, Cursor, Codex, OpenCode — and who pays for what |
 | [Context as files](docs/context-files.md) | The whole layer as markdown on disk |
 | [Account timeline](docs/timeline.md) | Where every piece of context came from, in order |
+| [Engineering tickets](docs/tickets.md) | Drafting a Linear or Jira ticket from account context |
 | [Configuration](docs/configuration.md) | Every variable, and where it can be set |
 | [Architecture](docs/architecture.md) | What each piece does, and the repo layout |
 | [Local development](docs/development.md) | Running and changing it |

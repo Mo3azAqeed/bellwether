@@ -36,5 +36,9 @@ everything else can wait until you're through the wizard:
 | `HUBSPOT_ACCESS_TOKEN` | no | Enables the HubSpot connector |
 | `SALESFORCE_INSTANCE_URL` / `SALESFORCE_CLIENT_ID` / `SALESFORCE_CLIENT_SECRET` | no | Enables the Salesforce connector (OAuth2 client credentials) |
 | `ATTIO_API_KEY` | no | Enables the Attio connector |
+| `TRACKER_PROVIDER` | no | `linear` or `jira` — only needed when both are configured |
+| `LINEAR_API_KEY` / `LINEAR_TEAM_ID` | no | Lets an approved draft be filed in Linear |
+| `JIRA_SITE_URL` / `JIRA_EMAIL` / `JIRA_API_TOKEN` / `JIRA_PROJECT_KEY` | no | Lets an approved draft be filed in Jira Cloud |
+| `JIRA_ISSUE_TYPE` | no | Defaults to `Task` |
 | `SLACK_ALERTS_CHANNEL` | no | Slack channel ID alerts post to on a tier change; unset = alerting off |
 | `SYNC_FREQUENCY_HOURS` | no | `4`, `8`, `12`, or `24` (default) — see [How data stays fresh](connectors.md#how-data-stays-fresh) |

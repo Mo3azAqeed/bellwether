@@ -82,6 +82,17 @@ export interface Env {
    * backfill, see src/connectors/attio.ts. */
   ATTIO_API_KEY?: string;
 
+  /** Issue tracker — where an approved ticket draft gets filed. Optional:
+   * without one, drafts can still be written and reviewed, just not filed. */
+  TRACKER_PROVIDER?: string; // "linear" | "jira"; inferred when only one is configured
+  LINEAR_API_KEY?: string;
+  LINEAR_TEAM_ID?: string;
+  JIRA_SITE_URL?: string; // https://yourcompany.atlassian.net
+  JIRA_EMAIL?: string;
+  JIRA_API_TOKEN?: string;
+  JIRA_PROJECT_KEY?: string;
+  JIRA_ISSUE_TYPE?: string; // defaults to "Task"
+
   /** Gates the /setup wizard (src/setup/) — set this BEFORE your first
    * deploy. Anyone with this token can view and change every connector
    * credential through the UI, so treat it like an admin password. */
