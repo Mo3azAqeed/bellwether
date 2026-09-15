@@ -22,16 +22,35 @@ goes there in one click.
 Newest first. A document with no date is left off rather than floated to the
 top: there's nowhere honest to put it on a timeline.
 
-## Getting in
+## Three places to read it
 
-It's gated by `SETUP_ADMIN_TOKEN`, the same credential as the setup wizard,
-and returns 501 when that isn't set.
+**Locally, with nothing to log into.** Run `npm run dev` and open
+<http://localhost:8787/timeline>. No token, no login form — on your own
+machine you already hold the database, so a password prompt protects nothing
+and just makes the page tedious to open from a terminal.
 
-**That is a real limitation, not a finished design.** This page shows
-verbatim customer conversations, so it wants per-user authentication, and an
-admin token shared with whoever configures the deployment is not that. Treat
-the URL as sensitive until that changes. If you need it in front of a whole
-CS team today, put it behind [Cloudflare
+**In Slack.** `/timeline Northwind` replies with the same history, links and
+all. The reply is ephemeral: it's verbatim customer conversation, and the
+person who asked is the one who needs it, not everyone scrolling the channel.
+The command ships in `worker/slack-manifest.json` — if your Slack app predates
+it, add a `/timeline` slash command pointing at
+`https://<your-worker>/slack/commands` and reinstall for the `commands` scope.
+
+**In your coding agent.** The `get_account_timeline` MCP tool returns it as
+text, so Claude Code, Cursor or Codex can pull an account's history into a
+session without leaving the terminal.
+
+## Getting in, deployed
+
+A deployed Worker is gated by `SETUP_ADMIN_TOKEN`, the same credential as the
+setup wizard, and returns 501 when that isn't set. The local exemption keys
+off the request's own hostname, which Cloudflare resolves before the script
+runs — a `Host: localhost` header on a public request does not open it.
+
+**The token is still a real limitation, not a finished design.** The page
+shows verbatim customer conversations, so it wants per-user authentication,
+and an admin token shared with whoever configures the deployment is not that.
+If you need it in front of a whole CS team today, put it behind [Cloudflare
 Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
 and keep the token as a second factor.
 

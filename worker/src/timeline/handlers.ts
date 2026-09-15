@@ -12,7 +12,29 @@ import { allDbAccounts } from "../db.js";
 import { buildTimeline } from "./data.js";
 import { renderTimelinePage } from "./page.js";
 
+/** True when the request came from the machine the Worker is running on —
+ * i.e. `wrangler dev` on someone's laptop, or a local container.
+ *
+ * On a deployed Worker this is never true. Cloudflare terminates the public
+ * request itself, so the URL it hands the handler carries the real hostname
+ * (`bellwether.you.workers.dev`, your custom domain); a client cannot make
+ * it say "localhost" by sending a Host header, because the hostname is
+ * resolved before the script runs. So this can't be spoofed into opening a
+ * production deployment. */
+export function isLocalRequest(req: Request): boolean {
+  try {
+    const host = new URL(req.url).hostname;
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0";
+  } catch {
+    return false;
+  }
+}
+
+/** Running locally, you are already the person who owns the database — you
+ * have the file on disk. A token prompt there protects nothing and just
+ * makes the page annoying to open from a terminal. Deployed, it is required. */
 function isAuthorized(req: Request, env: Env): boolean {
+  if (isLocalRequest(req)) return true;
   if (!env.SETUP_ADMIN_TOKEN) return false;
   return req.headers.get("authorization") === `Bearer ${env.SETUP_ADMIN_TOKEN}`;
 }
@@ -21,8 +43,8 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-export function handleTimelinePage(env: Env): Response {
-  if (!env.SETUP_ADMIN_TOKEN) {
+export function handleTimelinePage(req: Request, env: Env): Response {
+  if (!env.SETUP_ADMIN_TOKEN && !isLocalRequest(req)) {
     return new Response(
       "The timeline is disabled: set SETUP_ADMIN_TOKEN (wrangler secret put SETUP_ADMIN_TOKEN) before using it.",
       { status: 501 }

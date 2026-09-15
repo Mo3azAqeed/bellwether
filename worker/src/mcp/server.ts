@@ -17,7 +17,10 @@ import { allDbAccounts, findAccountByName } from "../db.js";
 import { resolveHealth, resolveQuestion } from "../bot-logic.js";
 import { retrieveContext } from "../rag/retrieve.js";
 import { recentLines } from "../rag/recent.js";
+import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation.js";
 import { getAnswerTrace, latestAnswerTrace, renderTrace } from "../rag/trace.js";
+import { buildTimeline } from "../timeline/data.js";
+import { renderTimelineText } from "../timeline/render.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -93,6 +96,19 @@ export const TOOLS: ToolDef[] = [
         limit: { type: "number", description: "How many excerpts to return (default 5, max 20)." },
       },
       required: ["account", "topic"],
+    },
+  },
+  {
+    name: "get_account_timeline",
+    description:
+      "Everything known about an account on one axis: time. Source records (calls, tickets, CRM notes) with a link into each original, the readings where the health tier actually moved, and the questions Bell has been asked with what it built each answer from. Use it before a call, or whenever the question is 'what has actually been happening here' rather than one specific thing. Costs nothing; reads stored rows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string", description: "Account name or a close match." },
+        limit: { type: "number", description: "How many entries to return, newest first (default 25, max 100)." },
+      },
+      required: ["account"],
     },
   },
   {
@@ -183,18 +199,18 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         case "question_error":
           return textResult(`Couldn't retrieve an answer for ${account.name} right now.`, true);
         case "question": {
-          // The URL is the point of a citation inside a coding agent: the
-          // agent can open it, and so can the person reading over its shoulder.
-          const sources = resolution.chunks
-            .map(
-              (c, i) =>
-                `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""}${c.url ? `\n    ${c.url}` : ""}`
-            )
-            .join("\n");
+          // Numbered to match the [n] markers in the answer, with the record's
+          // own words and a URL the agent — or the person reading over its
+          // shoulder — can open.
+          const sources = citationLines(buildCitations(resolution.chunks), (label, url) => `${label} — ${url}`).join("\n\n");
+          const unverified = unverifiedQuotes(resolution.answer, resolution.chunks);
+          const warning = unverified.length
+            ? `\n\n⚠️ Not found verbatim in the notes: ${unverified.map((q) => `“${q}”`).join("; ")}. Treat as the model's wording, not the customer's.`
+            : "";
           const trace = resolution.traceId
             ? `\n\nTrace ${resolution.traceId} — call explain_answer with this id to see which excerpts were retrieved, how they scored, and which model answered.`
             : "";
-          return textResult(`${resolution.answer}${sources ? `\n\nSources:\n${sources}` : ""}${trace}`);
+          return textResult(`${resolution.answer}${warning}${sources ? `\n\nSources:\n${sources}` : ""}${trace}`);
         }
         default:
           return textResult("Unexpected error answering the question.", true);
@@ -234,6 +250,22 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         )
         .join("\n\n");
       return textResult(`${chunks.length} excerpt(s) from ${account.name}'s history, most relevant first:\n\n${excerpts}`);
+    }
+
+    case "get_account_timeline": {
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      if (!accountQuery) return textResult("account is required.", true);
+
+      const account = await findAccountByName(env.DB, accountQuery);
+      if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+
+      const requested = typeof args.limit === "number" ? args.limit : 25;
+      const limit = Math.max(1, Math.min(100, Math.floor(requested)));
+
+      const timeline = await buildTimeline(env, account.account_id, limit);
+      if (!timeline) return textResult(`No account matching "${accountQuery}".`, true);
+
+      return textResult(renderTimelineText(timeline, { limit }));
     }
 
     case "explain_answer": {

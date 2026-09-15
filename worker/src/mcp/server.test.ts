@@ -57,7 +57,7 @@ describe("handleMcpRequest", () => {
     });
   });
 
-  it("lists all five tools with schemas", async () => {
+  it("lists all six tools with schemas", async () => {
     const res = await handleMcpRequest(rpcRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }), fakeEnv);
     const body = await res.json();
     expect(body.result.tools).toEqual(TOOLS);
@@ -66,6 +66,7 @@ describe("handleMcpRequest", () => {
       "get_account_health",
       "ask_about_account",
       "get_account_context",
+      "get_account_timeline",
       "explain_answer",
     ]);
   });

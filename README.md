@@ -63,8 +63,9 @@ Sources:
 • intercom · 2026-08-22: "SSO cert expired, blocking new logins for..."
 ```
 
-Those citations are the point, and **each one links back to the record it
-came from** — the actual Zoom recording, the actual Intercom conversation,
+Those citations are numbered to match the `[1]` markers in the answer, each
+carries the record's own words, and **each links back to the record it came
+from** — the actual Zoom recording, the actual Intercom conversation,
 the actual Salesforce task. You can open the evidence and disagree with it
 mid-call. Bellwether answers only from what it actually retrieved, and when
 nothing relevant has been ingested it says so instead of writing something
@@ -132,7 +133,7 @@ once, so no two front ends can answer it differently.
 | **Microsoft Teams** | The same bot, same cards, for teams that don't live in Slack | [Deploy, step 6](docs/deploy.md) |
 | **Your coding agent** | Claude Code, Cursor, Codex and OpenCode reach the same context over MCP — four tools, three of which make no model call at all | [docs/mcp.md](docs/mcp.md) |
 | **Plain files** | `npm run context:pull` writes the whole context layer to markdown you can read, grep and diff | [docs/context-files.md](docs/context-files.md) |
-| **A timeline** | `/timeline` — one vertical axis showing where every piece of an account's context came from, and the answers Bell built from it | [docs/timeline.md](docs/timeline.md) |
+| **A timeline** | One vertical axis showing where every piece of context came from — as a page, as `/timeline <account>` in Slack, or as an MCP tool in your terminal | [docs/timeline.md](docs/timeline.md) |
 
 ## What it plugs into
 

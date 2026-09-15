@@ -103,7 +103,10 @@ const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem("bw_admin_token") || "";
 
 async function api(path) {
-  const res = await fetch(path, { headers: { Authorization: "Bearer " + token } });
+  // No header when there's no token: running locally the Worker accepts it,
+  // which is what makes the page open straight from a terminal with nothing
+  // to type.
+  const res = await fetch(path, token ? { headers: { Authorization: "Bearer " + token } } : {});
   if (res.status === 401) throw new Error("unauthorized");
   if (!res.ok) throw new Error("Request failed (" + res.status + ")");
   return res.json();
@@ -203,7 +206,9 @@ $("signin").onclick = async () => {
 };
 $("token").onkeydown = (e) => { if (e.key === "Enter") $("signin").click(); };
 
-if (token) start().catch(() => { /* stale token — fall through to the login form */ });
+// Try unauthenticated first — locally that succeeds and there is nothing to
+// log into. Deployed it 401s and the form appears.
+start().catch(() => { /* needs a token, or the stored one is stale */ });
 </script>
 </body>
 </html>`;

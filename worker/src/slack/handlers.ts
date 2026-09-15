@@ -1,8 +1,10 @@
 import type { Env } from "../env.js";
-import { getAccountById, setOwnerSlackId, getLatestSnapshot } from "../db.js";
+import { getAccountById, setOwnerSlackId, getLatestSnapshot, findAccountByName, allDbAccounts } from "../db.js";
 import { resolveMention, resolveQuestion, type MentionResolution } from "../bot-logic.js";
 import { buildAccountBlocks, buildAnswerBlocks } from "./blocks.js";
 import { getAnswerTrace, renderTrace } from "../rag/trace.js";
+import { buildTimeline } from "../timeline/data.js";
+import { renderTimelineText } from "../timeline/render.js";
 import { postMessage, openView, respondToInteraction } from "./api.js";
 
 function stripMention(text: string): string {
@@ -179,4 +181,29 @@ export async function handleViewSubmission(env: Env, payload: any) {
       text: `Assigned ${account?.name ?? accountId} to <@${selectedUserId}> — they've been notified.`,
     });
   }
+}
+
+/** `/timeline Northwind` — the account's history as a reply in the channel,
+ * so checking where a claim came from doesn't mean leaving Slack. Posted
+ * ephemerally: it's verbatim customer conversation, and the person who
+ * asked is the one who should see it, not everyone scrolling past.
+ *
+ * Slack caps a message at 3000 characters per text block, so this shows the
+ * newest entries and says how many it left out rather than being silently
+ * truncated by Slack. */
+export async function handleTimelineCommand(env: Env, accountQuery: string): Promise<string> {
+  const query = accountQuery.trim();
+  if (!query) return "Which account? Try `/timeline Northwind`.";
+
+  const account = await findAccountByName(env.DB, query);
+  if (!account) {
+    const names = (await allDbAccounts(env.DB)).slice(0, 5).map((a) => a.name);
+    return `No account matching "${query}".${names.length ? ` Try one of: ${names.join(", ")}.` : ""}`;
+  }
+
+  const timeline = await buildTimeline(env, account.account_id, 12);
+  if (!timeline) return `No account matching "${query}".`;
+
+  const text = renderTimelineText(timeline, { link: (label, url) => `<${url}|${label}>`, limit: 12 });
+  return text.length > 2900 ? `${text.slice(0, 2900).trimEnd()}\n\n…trimmed to fit a Slack message.` : text;
 }

@@ -2,6 +2,7 @@ import type { DbAccount } from "../db.js";
 import type { HealthSnapshot } from "../baseline.js";
 import type { RetrievedChunk } from "../rag/retrieve.js";
 import { recentLines, type RecentDocument } from "../rag/recent.js";
+import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation.js";
 import type { AdaptiveCardAttachment } from "./api.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
@@ -111,18 +112,21 @@ export function buildAnswerCard(accountName: string, answer: string, sources: Re
   const body: unknown[] = [{ type: "TextBlock", text: `**${accountName}**`, wrap: true, weight: "Bolder" }, { type: "TextBlock", text: answer, wrap: true }];
 
   if (sources.length > 0) {
-    const sourceText = sources
-      .map((s) => {
-        const label = `${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}`;
-        // Adaptive Card TextBlocks render a markdown link; fall back to
-        // plain emphasis rather than pointing anywhere uncertain.
-        const head = s.url ? `[${label}](${s.url})` : `*${label}*`;
-        return `• ${head}: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`;
-      })
-      .join("\n\n");
+    // Numbered to match the [n] markers in the answer — see citation.ts.
+    const sourceText = citationLines(buildCitations(sources), (label, url) => `[${label}](${url})`).join("\n\n");
     body.push({ type: "TextBlock", text: `Sources:\n\n${sourceText}`, wrap: true, isSubtle: true, size: "Small" });
   } else {
     body.push({ type: "TextBlock", text: "No ingested notes for this account yet — this is usage data only.", wrap: true, isSubtle: true, size: "Small" });
+  }
+
+  const unverified = unverifiedQuotes(answer, sources);
+  if (unverified.length) {
+    body.push({
+      type: "TextBlock",
+      text: `⚠️ ${unverified.length === 1 ? "A quote in this answer isn't" : `${unverified.length} quotes in this answer aren't`} in the notes above — treat ${unverified.length === 1 ? "it" : "them"} as the model's wording, not the customer's.`,
+      wrap: true,
+      size: "Small",
+    });
   }
 
   return wrapCard(body);

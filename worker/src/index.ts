@@ -1,6 +1,6 @@
 import type { Env } from "./env.js";
 import { verifySlackRequest } from "./slack/verify.js";
-import { handleAppMention, handleBlockAction, handleViewSubmission } from "./slack/handlers.js";
+import { handleAppMention, handleBlockAction, handleViewSubmission, handleTimelineCommand } from "./slack/handlers.js";
 import { ingestDocument, type IngestInput } from "./rag/ingest.js";
 import { allDbAccounts, recordHealthSnapshot, getLatestSnapshot } from "./db.js";
 import { computeHealth, type HealthSnapshot } from "./baseline.js";
@@ -270,6 +270,37 @@ async function handleMcp(req: Request, env: Env): Promise<Response> {
   return handleMcpRequest(req, env);
 }
 
+/** Slash commands arrive form-encoded, not JSON, and Slack shows whatever
+ * we return within 3 seconds. A timeline is two indexed queries, so it
+ * answers inline rather than going through the deferred response_url dance
+ * the mention path needs. */
+async function handleSlackCommand(req: Request, env: Env): Promise<Response> {
+  const rawBody = await req.text();
+  const ok = await verifySlackRequest(
+    env.SLACK_SIGNING_SECRET,
+    req.headers.get("x-slack-request-timestamp"),
+    req.headers.get("x-slack-signature"),
+    rawBody
+  );
+  if (!ok) return new Response("invalid signature", { status: 401 });
+
+  const form = new URLSearchParams(rawBody);
+  const command = form.get("command") ?? "";
+  if (command !== "/timeline") {
+    return json({ response_type: "ephemeral", text: `Unknown command ${command}.` });
+  }
+
+  try {
+    const text = await handleTimelineCommand(env, form.get("text") ?? "");
+    // Ephemeral: this is verbatim customer conversation, and the person who
+    // asked is the one who needs it — not everyone scrolling the channel.
+    return json({ response_type: "ephemeral", text });
+  } catch (err) {
+    console.error("/timeline failed", err);
+    return json({ response_type: "ephemeral", text: "Couldn't build that timeline right now." });
+  }
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -279,6 +310,9 @@ export default {
     }
     if (req.method === "POST" && url.pathname === "/slack/interactions") {
       return handleSlackInteractions(req, env, ctx);
+    }
+    if (req.method === "POST" && url.pathname === "/slack/commands") {
+      return handleSlackCommand(req, env);
     }
     if (req.method === "POST" && url.pathname === "/ingest") {
       return handleIngest(req, env);
@@ -306,7 +340,7 @@ export default {
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "POST" } });
     }
     if (req.method === "GET" && url.pathname === "/timeline") {
-      return handleTimelinePage(env);
+      return handleTimelinePage(req, env);
     }
     if (req.method === "GET" && url.pathname === "/timeline/api/accounts") {
       return handleTimelineAccounts(req, env);

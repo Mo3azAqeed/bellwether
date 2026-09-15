@@ -1,6 +1,7 @@
 import type { DbAccount } from "../db.js";
 import type { HealthSnapshot } from "../baseline.js";
 import { recentLines, type RecentDocument } from "../rag/recent.js";
+import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation.js";
 import type { RetrievedChunk } from "../rag/retrieve.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
@@ -138,15 +139,10 @@ export function buildAnswerBlocks(
   ];
 
   if (sources.length > 0) {
-    const sourceLines = sources
-      .map((s) => {
-        // Slack link syntax when we know where the record lives, plain
-        // italics when we don't — never a link that goes nowhere.
-        const label = `${s.source}${s.occurredAt ? ` · ${s.occurredAt}` : ""}`;
-        const head = s.url ? `<${s.url}|${label}>` : `_${label}_`;
-        return `• ${head}: ${s.chunkText.slice(0, 140)}${s.chunkText.length > 140 ? "…" : ""}`;
-      })
-      .join("\n");
+    // Numbered to match the [n] markers in the answer: the model was handed
+    // these notes in this order, so "[2]" has to point at the second entry
+    // here or the citation is decorative.
+    const sourceLines = citationLines(buildCitations(sources), (label, url) => `<${url}|${label}>`).join("\n\n");
     blocks.push({
       type: "context",
       elements: [{ type: "mrkdwn", text: `Sources:\n${sourceLines}` }],
@@ -155,6 +151,22 @@ export function buildAnswerBlocks(
     blocks.push({
       type: "context",
       elements: [{ type: "mrkdwn", text: "No ingested notes for this account yet — this is usage data only." }],
+    });
+  }
+
+  // A fabricated customer quote read aloud on a renewal call is the worst
+  // thing this product can do, so say when one can't be found in the notes
+  // rather than letting it pass as verified.
+  const unverified = unverifiedQuotes(answer, sources);
+  if (unverified.length) {
+    blocks.push({
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `:warning: ${unverified.length === 1 ? "A quote in this answer isn't" : `${unverified.length} quotes in this answer aren't`} in the notes above — treat ${unverified.length === 1 ? "it" : "them"} as the model's wording, not the customer's.`,
+        },
+      ],
     });
   }
 
