@@ -56,7 +56,7 @@ async function sendResolution(env: Env, activity: TeamsActivity, resolution: Men
     case "health":
       await replyToActivity(env, activity, {
         text: `${resolution.account.name} health summary`,
-        attachments: [buildAccountCard(resolution.account, resolution.health)],
+        attachments: [buildAccountCard(resolution.account, resolution.health, resolution.recent)],
       });
       return;
     case "health_error":

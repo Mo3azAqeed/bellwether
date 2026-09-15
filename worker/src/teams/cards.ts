@@ -1,6 +1,7 @@
 import type { DbAccount } from "../db.js";
 import type { HealthSnapshot } from "../baseline.js";
 import type { RetrievedChunk } from "../rag/retrieve.js";
+import { recentLines, type RecentDocument } from "../rag/recent.js";
 import type { AdaptiveCardAttachment } from "./api.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
@@ -37,7 +38,11 @@ function wrapCard(body: unknown[]): AdaptiveCardAttachment {
   };
 }
 
-export function buildAccountCard(account: DbAccount, health: HealthSnapshot): AdaptiveCardAttachment {
+export function buildAccountCard(
+  account: DbAccount,
+  health: HealthSnapshot,
+  recent: RecentDocument[] = []
+): AdaptiveCardAttachment {
   const renewalText = health.renewalDaysOut >= 0 ? `in ${health.renewalDaysOut} days` : `${Math.abs(health.renewalDaysOut)} days ago`;
   // No Teams equivalent of Slack's <@user> mention rendering from a stored
   // Slack user id — csm_owner_slack_id is a Slack-specific field, so Teams
@@ -57,6 +62,18 @@ export function buildAccountCard(account: DbAccount, health: HealthSnapshot): Ad
         { title: "Owner", value: ownerText },
       ],
     },
+    // Usage says the account is fine; the last ticket may say otherwise.
+    ...(recent.length
+      ? [
+          {
+            type: "TextBlock",
+            text: `**Lately**\n\n${recentLines(recent, (label, url) => `[${label}](${url})`)
+              .map((line) => `• ${line}`)
+              .join("\n\n")}`,
+            wrap: true,
+          },
+        ]
+      : []),
     {
       type: "ActionSet",
       actions: [
@@ -67,7 +84,7 @@ export function buildAccountCard(account: DbAccount, health: HealthSnapshot): Ad
     },
     {
       type: "TextBlock",
-      text: `Status: ${TIER_LABEL[health.tier]} · computed from usage data`,
+      text: `Status: ${TIER_LABEL[health.tier]} · tier computed from usage data${recent.length ? ", with what was said lately alongside it" : ""}`,
       wrap: true,
       isSubtle: true,
       size: "Small",

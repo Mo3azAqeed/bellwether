@@ -1,5 +1,6 @@
 import type { DbAccount } from "../db.js";
 import type { HealthSnapshot } from "../baseline.js";
+import { recentLines, type RecentDocument } from "../rag/recent.js";
 import type { RetrievedChunk } from "../rag/retrieve.js";
 
 const TIER_LABEL: Record<HealthSnapshot["tier"], string> = {
@@ -25,7 +26,7 @@ function summaryLine(h: HealthSnapshot): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): any[] {
+export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot, recent: RecentDocument[] = []): any[] {
   const renewalText =
     health.renewalDaysOut >= 0
       ? `in ${health.renewalDaysOut} days`
@@ -52,6 +53,21 @@ export function buildAccountBlocks(account: DbAccount, health: HealthSnapshot): 
         { type: "mrkdwn", text: `*Owner*\n${ownerText}` },
       ],
     },
+    // Usage says the account is fine; the last ticket may say otherwise.
+    // Both belong on the same card, or the card gets believed too easily.
+    ...(recent.length
+      ? [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `*Lately*\n${recentLines(recent, (label, url) => `<${url}|${label}>`)
+                .map((line) => `• ${line}`)
+                .join("\n")}`,
+            },
+          },
+        ]
+      : []),
     {
       type: "actions",
       elements: [

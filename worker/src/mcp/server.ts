@@ -16,6 +16,7 @@ import type { Env } from "../env.js";
 import { allDbAccounts, findAccountByName } from "../db.js";
 import { resolveHealth, resolveQuestion } from "../bot-logic.js";
 import { retrieveContext } from "../rag/retrieve.js";
+import { recentLines } from "../rag/recent.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -128,8 +129,17 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
           const h = resolution.health;
           const tierLabel = h.tier === "at_risk" ? "at risk" : h.tier;
           const delta = h.baselineDeltaPct >= 0 ? `+${h.baselineDeltaPct}` : `${h.baselineDeltaPct}`;
+          const headline = `${resolution.account.name}: ${tierLabel}. ${h.avgActiveSeats} of ${h.seatsPurchased} seats active (${delta}% vs its own baseline), renews in ${h.renewalDaysOut} days. Owner: ${resolution.account.csm_owner_name ?? "unassigned"}.`;
+          // The tier is usage only. Handing back the last few things on file
+          // alongside it is what stops an agent reporting "healthy" on the
+          // morning of an angry ticket.
+          const lately = recentLines(resolution.recent, (label, url) => `${label} — ${url}`)
+            .map((line) => `- ${line}`)
+            .join("\n");
           return textResult(
-            `${resolution.account.name}: ${tierLabel}. ${h.avgActiveSeats} of ${h.seatsPurchased} seats active (${delta}% vs its own baseline), renews in ${h.renewalDaysOut} days. Owner: ${resolution.account.csm_owner_name ?? "unassigned"}.`
+            lately
+              ? `${headline}\n\nLately (most recent first, independent of the tier):\n${lately}`
+              : `${headline}\n\nNothing ingested for this account yet, so the tier is the only signal here.`
           );
         }
         default:

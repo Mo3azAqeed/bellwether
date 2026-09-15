@@ -29,7 +29,7 @@ async function sendResolution(env: Env, channel: string, threadTs: string | unde
         channel,
         thread_ts: threadTs,
         text: `${resolution.account.name} health summary`,
-        blocks: buildAccountBlocks(resolution.account, resolution.health),
+        blocks: buildAccountBlocks(resolution.account, resolution.health, resolution.recent),
       });
       return;
     case "health_error":

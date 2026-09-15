@@ -136,12 +136,50 @@ describe("callTool", () => {
       kind: "health",
       account: { account_id: "1", name: "Northwind", plan: "pro", seats_purchased: 40, renewal_date: "2026-11-01", csm_owner_name: "Maya", csm_owner_slack_id: null, usage_pattern: null },
       health: { avgActiveSeats: 12, seatsPurchased: 40, baselineDeltaPct: -52, tier: "at_risk", renewalDaysOut: 23 },
+      recent: [],
     });
     const result = await callTool(fakeEnv, "get_account_health", { account: "Northwind" });
-    expect(result.content[0].text).toBe(
+    expect(result.content[0].text).toContain(
       "Northwind: at risk. 12 of 40 seats active (-52% vs its own baseline), renews in 23 days. Owner: Maya."
     );
     expect(result.isError).toBeFalsy();
+  });
+
+  it("says outright that the tier is the only signal when nothing is ingested", async () => {
+    vi.mocked(resolveHealth).mockResolvedValueOnce({
+      kind: "health",
+      account: fakeAccount,
+      health: { avgActiveSeats: 30, seatsPurchased: 40, baselineDeltaPct: 4, tier: "stable", renewalDaysOut: 50 },
+      recent: [],
+    });
+    const result = await callTool(fakeEnv, "get_account_health", { account: "Northwind" });
+    expect(result.content[0].text).toContain("Nothing ingested for this account yet");
+  });
+
+  it("hands back what was said lately alongside a healthy tier", async () => {
+    // The failure this exists to prevent: reporting "stable" on the morning
+    // of an angry ticket, because the tier only knows about seat counts.
+    vi.mocked(resolveHealth).mockResolvedValueOnce({
+      kind: "health",
+      account: fakeAccount,
+      health: { avgActiveSeats: 38, seatsPurchased: 40, baselineDeltaPct: 3, tier: "stable", renewalDaysOut: 60 },
+      recent: [
+        {
+          source: "intercom",
+          sourceRef: "9981",
+          url: "https://app.intercom.com/a/apps/abc/conversations/9981",
+          occurredAt: "2026-09-13",
+          excerpt: "Third time this month the bulk export has failed. This is becoming a problem.",
+        },
+      ],
+    });
+    const result = await callTool(fakeEnv, "get_account_health", { account: "Northwind" });
+    const text = result.content[0].text;
+    expect(text).toContain("stable");
+    expect(text).toContain("Lately");
+    expect(text).toContain("intercom · 2026-09-13");
+    expect(text).toContain("bulk export has failed");
+    expect(text).toContain("https://app.intercom.com/a/apps/abc/conversations/9981");
   });
 
   it("get_account_health surfaces account_not_found as an error with suggestions", async () => {
