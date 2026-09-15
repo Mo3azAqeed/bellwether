@@ -12,10 +12,16 @@ vi.mock("../bot-logic.js", () => ({
 vi.mock("../rag/retrieve.js", () => ({
   retrieveContext: vi.fn(),
 }));
+vi.mock("../rag/trace.js", () => ({
+  getAnswerTrace: vi.fn(),
+  latestAnswerTrace: vi.fn(),
+  renderTrace: vi.fn(() => "RENDERED TRACE"),
+}));
 
 const { allDbAccounts, findAccountByName } = await import("../db.js");
 const { resolveHealth, resolveQuestion } = await import("../bot-logic.js");
 const { retrieveContext } = await import("../rag/retrieve.js");
+const { getAnswerTrace, latestAnswerTrace, renderTrace } = await import("../rag/trace.js");
 
 const fakeAccount = {
   account_id: "1",
@@ -51,7 +57,7 @@ describe("handleMcpRequest", () => {
     });
   });
 
-  it("lists all four tools with schemas", async () => {
+  it("lists all five tools with schemas", async () => {
     const res = await handleMcpRequest(rpcRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" }), fakeEnv);
     const body = await res.json();
     expect(body.result.tools).toEqual(TOOLS);
@@ -60,6 +66,7 @@ describe("handleMcpRequest", () => {
       "get_account_health",
       "ask_about_account",
       "get_account_context",
+      "explain_answer",
     ]);
   });
 
@@ -278,5 +285,66 @@ describe("get_account_context", () => {
     const result = await callTool(fakeEnv, "get_account_context", { account: "Northwind", topic: "x" });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Couldn't search");
+  });
+});
+
+describe("explain_answer", () => {
+  it("needs something to look up", async () => {
+    const result = await callTool(fakeEnv, "explain_answer", {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("trace_id or account");
+  });
+
+  it("renders the trace for an id", async () => {
+    vi.mocked(getAnswerTrace).mockResolvedValueOnce({
+      id: "t-1",
+      accountId: "1",
+      question: "why is Northwind declining?",
+      answer: "Their admin left.",
+      provider: "anthropic",
+      model: "claude-haiku-4-5-20251001",
+      prompt: "...",
+      chunks: [],
+      retrievalMs: 40,
+      generationMs: 900,
+      createdAt: "2026-09-15 10:00:00",
+    });
+    const result = await callTool(fakeEnv, "explain_answer", { trace_id: "t-1" });
+    expect(result.content[0].text).toBe("RENDERED TRACE");
+    expect(vi.mocked(renderTrace).mock.calls.at(-1)?.[1]).toEqual({ includePrompt: false });
+  });
+
+  it("passes include_prompt through when asked", async () => {
+    vi.mocked(getAnswerTrace).mockResolvedValueOnce({
+      id: "t-1", accountId: "1", question: "q", answer: "a", provider: "workers-ai",
+      model: "m", prompt: "p", chunks: [], retrievalMs: null, generationMs: null, createdAt: "2026-09-15",
+    });
+    await callTool(fakeEnv, "explain_answer", { trace_id: "t-1", include_prompt: true });
+    expect(vi.mocked(renderTrace).mock.calls.at(-1)?.[1]).toEqual({ includePrompt: true });
+  });
+
+  it("says plainly that a missing trace has probably expired", async () => {
+    vi.mocked(getAnswerTrace).mockResolvedValueOnce(undefined);
+    const result = await callTool(fakeEnv, "explain_answer", { trace_id: "gone" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("expire");
+  });
+
+  it("falls back to an account's most recent answer", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(latestAnswerTrace).mockResolvedValueOnce({
+      id: "t-9", accountId: "1", question: "q", answer: "a", provider: "openrouter",
+      model: "deepseek/deepseek-chat", prompt: "p", chunks: [], retrievalMs: null, generationMs: null, createdAt: "2026-09-15",
+    });
+    const result = await callTool(fakeEnv, "explain_answer", { account: "Northwind" });
+    expect(result.content[0].text).toBe("RENDERED TRACE");
+  });
+
+  it("says so when an account has never been asked about", async () => {
+    vi.mocked(findAccountByName).mockResolvedValueOnce(fakeAccount);
+    vi.mocked(latestAnswerTrace).mockResolvedValueOnce(undefined);
+    const result = await callTool(fakeEnv, "explain_answer", { account: "Northwind" });
+    expect(result.content[0].text).toContain("No questions have been answered");
+    expect(result.isError).toBeFalsy();
   });
 });

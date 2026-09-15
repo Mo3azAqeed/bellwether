@@ -12,6 +12,7 @@ import { ingestZendeskTicket } from "./connectors/zendesk.js";
 import { backfillRecentHubSpot } from "./connectors/hubspot.js";
 import { backfillRecentSalesforce } from "./connectors/salesforce.js";
 import { backfillRecentAttio } from "./connectors/attio.js";
+import { pruneAnswerTraces } from "./rag/trace.js";
 import { getSetting } from "./settings.js";
 import { maybeAlert } from "./alerts.js";
 import { claimSyncIfDue } from "./sync-schedule.js";
@@ -380,6 +381,18 @@ export default {
       await backfillRecentAttio(env);
     } catch (err) {
       console.error("attio backfill failed", err);
+    }
+
+    // Answer traces hold a second copy of customer text. They earn their
+    // keep for as long as someone might ask how an answer was reached, and
+    // become a liability after that.
+    try {
+      const configured = await getSetting(env, "ANSWER_TRACE_RETENTION_DAYS");
+      const days = Number(configured);
+      const deleted = await pruneAnswerTraces(env, Number.isFinite(days) && days > 0 ? days : undefined);
+      if (deleted) console.log(`pruned ${deleted} expired answer trace(s)`);
+    } catch (err) {
+      console.error("answer trace pruning failed", err);
     }
   },
 } satisfies ExportedHandler<Env>;

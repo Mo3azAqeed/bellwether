@@ -17,6 +17,7 @@ import { allDbAccounts, findAccountByName } from "../db.js";
 import { resolveHealth, resolveQuestion } from "../bot-logic.js";
 import { retrieveContext } from "../rag/retrieve.js";
 import { recentLines } from "../rag/recent.js";
+import { getAnswerTrace, latestAnswerTrace, renderTrace } from "../rag/trace.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -94,6 +95,28 @@ export const TOOLS: ToolDef[] = [
       required: ["account", "topic"],
     },
   },
+  {
+    name: "explain_answer",
+    description:
+      "Show how a previous ask_about_account answer was built: which excerpts retrieval picked and how strongly each scored, which provider and model answered, how long each step took, and optionally the literal prompt that was sent. Use it when an answer looks wrong or surprising — the cause is usually retrieval picking the wrong evidence, which the answer text alone never shows. Costs nothing; reads stored rows.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        trace_id: {
+          type: "string",
+          description: "The trace id printed under an ask_about_account answer. Omit it and pass account instead to get that account's most recent answer.",
+        },
+        account: {
+          type: "string",
+          description: "Account name — returns the most recent answer for it. Ignored when trace_id is given.",
+        },
+        include_prompt: {
+          type: "boolean",
+          description: "Include the exact prompt sent to the model. Long; useful when the retrieved excerpts look right but the answer doesn't.",
+        },
+      },
+    },
+  },
 ];
 
 function textResult(text: string, isError = false): ToolContent {
@@ -168,7 +191,10 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
                 `[${i + 1}] ${c.source}${c.occurredAt ? ` · ${c.occurredAt}` : ""}${c.url ? `\n    ${c.url}` : ""}`
             )
             .join("\n");
-          return textResult(`${resolution.answer}${sources ? `\n\nSources:\n${sources}` : ""}`);
+          const trace = resolution.traceId
+            ? `\n\nTrace ${resolution.traceId} — call explain_answer with this id to see which excerpts were retrieved, how they scored, and which model answered.`
+            : "";
+          return textResult(`${resolution.answer}${sources ? `\n\nSources:\n${sources}` : ""}${trace}`);
         }
         default:
           return textResult("Unexpected error answering the question.", true);
@@ -208,6 +234,32 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
         )
         .join("\n\n");
       return textResult(`${chunks.length} excerpt(s) from ${account.name}'s history, most relevant first:\n\n${excerpts}`);
+    }
+
+    case "explain_answer": {
+      const traceId = typeof args.trace_id === "string" ? args.trace_id.trim() : "";
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      const includePrompt = args.include_prompt === true;
+
+      if (!traceId && !accountQuery) return textResult("Pass either trace_id or account.", true);
+
+      let trace;
+      if (traceId) {
+        trace = await getAnswerTrace(env, traceId);
+        if (!trace) {
+          return textResult(
+            `No trace ${traceId}. Traces expire on a retention window (30 days by default), so an older answer may no longer have one.`,
+            true
+          );
+        }
+      } else {
+        const account = await findAccountByName(env.DB, accountQuery);
+        if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+        trace = await latestAnswerTrace(env, account.account_id);
+        if (!trace) return textResult(`No questions have been answered about ${account.name} yet.`);
+      }
+
+      return textResult(renderTrace(trace, { includePrompt }));
     }
 
     default:

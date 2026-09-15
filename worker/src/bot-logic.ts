@@ -11,13 +11,23 @@ import { computeHealth, type HealthSnapshot } from "./baseline.js";
 import { retrieveContext, type RetrievedChunk } from "./rag/retrieve.js";
 import { recentContext, type RecentDocument } from "./rag/recent.js";
 import { generateAnswer } from "./rag/generate.js";
+import { recordAnswerTrace } from "./rag/trace.js";
 
 export type MentionResolution =
   | { kind: "empty" }
   | { kind: "account_not_found"; query: string; sampleNames: string[] }
   | { kind: "health"; account: DbAccount; health: HealthSnapshot; recent: RecentDocument[] }
   | { kind: "health_error"; account: DbAccount }
-  | { kind: "question"; account: DbAccount; question: string; answer: string; chunks: RetrievedChunk[] }
+  | {
+      kind: "question";
+      account: DbAccount;
+      question: string;
+      answer: string;
+      chunks: RetrievedChunk[];
+      /** Looks up the full derivation later. Undefined only if the trace
+       * couldn't be written — the answer never waits on bookkeeping. */
+      traceId?: string;
+    }
   | { kind: "question_error"; account: DbAccount }
   | { kind: "unresolved_question"; question: string };
 
@@ -91,9 +101,27 @@ export async function resolveHealth(env: Env, accountQuery: string): Promise<Men
 
 export async function resolveQuestion(env: Env, account: DbAccount, question: string): Promise<MentionResolution> {
   try {
+    const retrievalStart = Date.now();
     const chunks = await retrieveContext(env, account.account_id, question);
-    const answer = await generateAnswer(env, account.name, question, chunks);
-    return { kind: "question", account, question, answer, chunks };
+    const retrievalMs = Date.now() - retrievalStart;
+
+    const generationStart = Date.now();
+    const generated = await generateAnswer(env, account.name, question, chunks);
+    const generationMs = Date.now() - generationStart;
+
+    const traceId = await recordAnswerTrace(env, {
+      accountId: account.account_id,
+      question,
+      answer: generated.text,
+      provider: generated.provider,
+      model: generated.model,
+      prompt: generated.prompt,
+      chunks,
+      retrievalMs,
+      generationMs,
+    });
+
+    return { kind: "question", account, question, answer: generated.text, chunks, traceId };
   } catch (err) {
     console.error("retrieveContext/generateAnswer failed", err);
     return { kind: "question_error", account };

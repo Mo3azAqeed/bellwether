@@ -36,6 +36,15 @@ function buildPrompt(accountName: string, question: string, chunks: RetrievedChu
   ].join("\n");
 }
 
+/** What answered, and what it was asked — the raw material for a trace.
+ * Returned rather than logged so the caller decides whether to persist it. */
+export interface GeneratedAnswer {
+  text: string;
+  provider: "workers-ai" | "openrouter" | "anthropic";
+  model: string;
+  prompt: string;
+}
+
 async function generateWithWorkersAI(env: Env, prompt: string): Promise<string> {
   const result = await env.AI.run(WORKERS_AI_MODEL, {
     messages: [{ role: "user", content: prompt }],
@@ -93,14 +102,27 @@ export async function generateAnswer(
   accountName: string,
   question: string,
   chunks: RetrievedChunk[]
-): Promise<string> {
+): Promise<GeneratedAnswer> {
   const prompt = buildPrompt(accountName, question, chunks);
   const [anthropicKey, openRouterKey, openRouterModel] = await Promise.all([
     getSetting(env, "ANTHROPIC_API_KEY"),
     getSetting(env, "OPENROUTER_API_KEY"),
     getSetting(env, "OPENROUTER_MODEL"),
   ]);
-  if (anthropicKey) return generateWithAnthropic(anthropicKey, prompt);
-  if (openRouterKey) return generateWithOpenRouter(openRouterKey, openRouterModel, prompt);
-  return generateWithWorkersAI(env, prompt);
+
+  // Which model answered is part of the answer's provenance: the same
+  // question routed to Workers AI and to Haiku can come back different, and
+  // "which one was this?" is the first question when one of them is wrong.
+  if (anthropicKey) {
+    return { text: await generateWithAnthropic(anthropicKey, prompt), provider: "anthropic", model: ANTHROPIC_MODEL, prompt };
+  }
+  if (openRouterKey) {
+    return {
+      text: await generateWithOpenRouter(openRouterKey, openRouterModel, prompt),
+      provider: "openrouter",
+      model: openRouterModel || DEFAULT_OPENROUTER_MODEL,
+      prompt,
+    };
+  }
+  return { text: await generateWithWorkersAI(env, prompt), provider: "workers-ai", model: WORKERS_AI_MODEL, prompt };
 }

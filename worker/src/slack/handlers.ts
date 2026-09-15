@@ -2,6 +2,7 @@ import type { Env } from "../env.js";
 import { getAccountById, setOwnerSlackId, getLatestSnapshot } from "../db.js";
 import { resolveMention, resolveQuestion, type MentionResolution } from "../bot-logic.js";
 import { buildAccountBlocks, buildAnswerBlocks } from "./blocks.js";
+import { getAnswerTrace, renderTrace } from "../rag/trace.js";
 import { postMessage, openView, respondToInteraction } from "./api.js";
 
 function stripMention(text: string): string {
@@ -44,7 +45,7 @@ async function sendResolution(env: Env, channel: string, threadTs: string | unde
         channel,
         thread_ts: threadTs,
         text: `${resolution.account.name}: ${resolution.answer}`,
-        blocks: buildAnswerBlocks(resolution.account.name, resolution.answer, resolution.chunks),
+        blocks: buildAnswerBlocks(resolution.account.name, resolution.answer, resolution.chunks, resolution.traceId),
       });
       return;
     case "question_error":
@@ -136,7 +137,7 @@ export async function handleBlockAction(env: Env, payload: any) {
     if (resolution.kind === "question") {
       await respondToInteraction(responseUrl, {
         text: `${account.name}: ${resolution.answer}`,
-        blocks: buildAnswerBlocks(account.name, resolution.answer, resolution.chunks),
+        blocks: buildAnswerBlocks(account.name, resolution.answer, resolution.chunks, resolution.traceId),
         replace_original: false,
       });
     } else {
@@ -145,6 +146,17 @@ export async function handleBlockAction(env: Env, payload: any) {
         replace_original: false,
       });
     }
+  }
+
+  if (action.action_id === "explain_answer") {
+    // The button's value is the trace id, not an account id.
+    const trace = await getAnswerTrace(env, action.value);
+    await respondToInteraction(responseUrl, {
+      text: trace
+        ? renderTrace(trace)
+        : "That answer's trace has expired — traces are kept for 30 days by default.",
+      replace_original: false,
+    });
   }
 }
 

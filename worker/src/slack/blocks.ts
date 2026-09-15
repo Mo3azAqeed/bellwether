@@ -124,7 +124,12 @@ export function buildAlertBlocks(account: DbAccount, previousTier: HealthSnapsho
 /** Renders a grounded answer plus the source chunks it was built from, so
  * the reader can check the citation rather than trust the model blindly. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildAnswerBlocks(accountName: string, answer: string, sources: RetrievedChunk[]): any[] {
+export function buildAnswerBlocks(
+  accountName: string,
+  answer: string,
+  sources: RetrievedChunk[],
+  traceId?: string
+): any[] {
   const blocks: any[] = [
     {
       type: "section",
@@ -150,6 +155,23 @@ export function buildAnswerBlocks(accountName: string, answer: string, sources: 
     blocks.push({
       type: "context",
       elements: [{ type: "mrkdwn", text: "No ingested notes for this account yet — this is usage data only." }],
+    });
+  }
+
+  // Citations say which records were used. This says why those records —
+  // the scores retrieval assigned and the model that answered. When a
+  // grounded answer is wrong it is almost always the former.
+  if (traceId) {
+    blocks.push({
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "How did it get this?" },
+          action_id: "explain_answer",
+          value: traceId,
+        },
+      ],
     });
   }
 
