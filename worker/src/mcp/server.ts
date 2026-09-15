@@ -21,6 +21,9 @@ import { buildCitations, citationLines, unverifiedQuotes } from "../rag/citation
 import { getAnswerTrace, latestAnswerTrace, renderTrace } from "../rag/trace.js";
 import { buildTimeline } from "../timeline/data.js";
 import { renderTimelineText } from "../timeline/render.js";
+import { buildTicketDraft, renderTicketMarkdown } from "../actions/draft.js";
+import { createTicket, resolveProvider, trackerConfig } from "../actions/tracker.js";
+import { saveDraft, getDraft, listDrafts, markFiled, discardDraft } from "../actions/store.js";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const SERVER_NAME = "bellwether";
@@ -109,6 +112,50 @@ export const TOOLS: ToolDef[] = [
         limit: { type: "number", description: "How many entries to return, newest first (default 25, max 100)." },
       },
       required: ["account"],
+    },
+  },
+  {
+    name: "draft_engineering_ticket",
+    description:
+      "Draft an engineering ticket from an account's context and SAVE IT AS A DRAFT. Retrieves what the customer actually said about a topic and builds a title and body carrying their verbatim words with a link to each record. Nothing is sent to Linear or Jira — the draft waits for a human to read it. Returns a draft id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        account: { type: "string", description: "Account name or a close match." },
+        topic: { type: "string", description: "What the ticket is about — used to retrieve the relevant records, and as the title." },
+        summary: { type: "string", description: "Optional: your own framing of why this is being filed." },
+      },
+      required: ["account", "topic"],
+    },
+  },
+  {
+    name: "list_ticket_drafts",
+    description:
+      "List saved ticket drafts, newest first — by default the ones still waiting on a human. Shows each draft's id, account, title and status, so a person can read one before deciding whether it should be filed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "pending (default), filed, or discarded." },
+        account: { type: "string", description: "Optional: only drafts for this account." },
+        limit: { type: "number", description: "How many to return (default 20, max 100)." },
+      },
+    },
+  },
+  {
+    name: "file_ticket_draft",
+    description:
+      "File a saved draft into the configured tracker (Linear or Jira). THIS IS THE ONLY TOOL THAT WRITES TO A TRACKER, it files the stored text verbatim, and it requires an explicit human approval — never call it on your own initiative or to 'tidy up' pending drafts. Show the draft to the person first and call this only once they have said to file it. Pass action 'discard' instead to throw a draft away.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        draft_id: { type: "string", description: "The id returned by draft_engineering_ticket or list_ticket_drafts." },
+        action: { type: "string", description: "'file' to create it in the tracker, or 'discard' to close it unfiled." },
+        approved_by: {
+          type: "string",
+          description: "Who approved it — the person's name as they gave it. Required for 'file'; recorded so an unexplained ticket can be traced back.",
+        },
+      },
+      required: ["draft_id", "action"],
     },
   },
   {
@@ -266,6 +313,134 @@ export async function callTool(env: Env, name: string, args: Record<string, unkn
       if (!timeline) return textResult(`No account matching "${accountQuery}".`, true);
 
       return textResult(renderTimelineText(timeline, { limit }));
+    }
+
+    case "draft_engineering_ticket": {
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+      const topic = typeof args.topic === "string" ? args.topic.trim() : "";
+      if (!accountQuery || !topic) return textResult("account and topic are both required.", true);
+
+      const account = await findAccountByName(env.DB, accountQuery);
+      if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+
+      let chunks;
+      try {
+        chunks = await retrieveContext(env, account.account_id, topic, 5);
+      } catch (err) {
+        console.error("retrieveContext failed", err);
+        return textResult(`Couldn't search ${account.name}'s history right now.`, true);
+      }
+
+      const summary =
+        typeof args.summary === "string" && args.summary.trim()
+          ? args.summary.trim()
+          : `Raised from ${account.name}'s account context: ${topic}.`;
+
+      const draft = buildTicketDraft({
+        accountName: account.name,
+        topic,
+        summary,
+        chunks,
+        facts: [
+          `${account.plan} plan`,
+          `${account.seats_purchased} seats`,
+          `renews ${account.renewal_date}`,
+          `owner ${account.csm_owner_name ?? "unassigned"}`,
+        ],
+      });
+      const body = renderTicketMarkdown(draft);
+
+      const draftId = await saveDraft(env, {
+        accountId: account.account_id,
+        title: draft.title,
+        body,
+        evidence: draft.evidence,
+        origin: "mcp",
+      });
+
+      const provider = resolveProvider(await trackerConfig(env));
+      const where = provider
+        ? `It would be filed in ${provider} once approved.`
+        : "No tracker is configured, so this can be read but not filed — set LINEAR_API_KEY + LINEAR_TEAM_ID, or the four JIRA_* settings.";
+      const thin = draft.evidence.length
+        ? ""
+        : " Nothing matching that topic is on file, so this draft carries no customer quotes — filing it would tell engineering very little.";
+
+      return textResult(
+        `Saved as draft ${draftId}. Nothing has been sent to any tracker.\n\nTitle: ${draft.title}\n\n${body}\n\n${where}${thin}\n\nShow this to the person who owns the account. If they approve it, call file_ticket_draft with draft_id ${draftId}, action "file" and their name.`
+      );
+    }
+
+    case "list_ticket_drafts": {
+      const status = args.status === "filed" || args.status === "discarded" ? args.status : "pending";
+      const accountQuery = typeof args.account === "string" ? args.account.trim() : "";
+
+      let accountId: string | undefined;
+      if (accountQuery) {
+        const account = await findAccountByName(env.DB, accountQuery);
+        if (!account) return textResult(`No account matching "${accountQuery}".`, true);
+        accountId = account.account_id;
+      }
+
+      const limit = typeof args.limit === "number" ? args.limit : 20;
+      const drafts = await listDrafts(env, { status, accountId, limit });
+      if (!drafts.length) {
+        return textResult(status === "pending" ? "No drafts are waiting for review." : `No ${status} drafts.`);
+      }
+
+      const lines = drafts.map((d) => {
+        const filed = d.trackerKey ? ` → ${d.trackerKey} ${d.trackerUrl ?? ""}` : "";
+        return `${d.id}\n  ${d.accountName ?? d.accountId} · ${d.createdAt} · via ${d.origin} · ${d.status}${filed}\n  ${d.title}`;
+      });
+      return textResult(`${drafts.length} ${status} draft(s), newest first:\n\n${lines.join("\n\n")}`);
+    }
+
+    case "file_ticket_draft": {
+      const draftId = typeof args.draft_id === "string" ? args.draft_id.trim() : "";
+      const action = typeof args.action === "string" ? args.action.trim() : "";
+      if (!draftId) return textResult("draft_id is required.", true);
+
+      const draft = await getDraft(env, draftId);
+      if (!draft) return textResult(`No draft ${draftId}.`, true);
+      if (draft.status !== "pending") {
+        const where = draft.trackerUrl ? ` (${draft.trackerKey}: ${draft.trackerUrl})` : "";
+        return textResult(`Draft ${draftId} was already ${draft.status}${where}. Nothing done.`, true);
+      }
+
+      if (action === "discard") {
+        await discardDraft(env, draftId);
+        return textResult(`Draft ${draftId} discarded. Nothing was filed.`);
+      }
+      if (action !== "file") return textResult(`Unknown action "${action}". Use "file" or "discard".`, true);
+
+      const approvedBy = typeof args.approved_by === "string" ? args.approved_by.trim() : "";
+      if (!approvedBy) {
+        return textResult(
+          "Not filed: approved_by is required, and must be the person who actually approved it. Show them the draft first.",
+          true
+        );
+      }
+
+      try {
+        // The stored text is filed verbatim — what was reviewed is what
+        // lands, with no regeneration in between that could change it.
+        const created = await createTicket(env, {
+          title: draft.title,
+          accountName: draft.accountName ?? draft.accountId,
+          summary: `${draft.body}\n\nApproved by ${approvedBy}.`,
+          evidence: [],
+          facts: [],
+        });
+        const claimed = await markFiled(env, draftId, { tracker: created.provider, key: created.key, url: created.url });
+        return textResult(
+          claimed
+            ? `Filed ${created.key} in ${created.provider}: ${created.url}`
+            : `Filed ${created.key} (${created.url}), but the draft had already been decided by someone else — check for a duplicate.`
+        );
+      } catch (err) {
+        console.error("file_ticket_draft failed", err);
+        return textResult(`Couldn't file it: ${err instanceof Error ? err.message : String(err)}. The draft is still pending.`, true);
+      }
     }
 
     case "explain_answer": {
