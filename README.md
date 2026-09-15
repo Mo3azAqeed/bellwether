@@ -72,6 +72,36 @@ nothing relevant has been ingested it says so instead of writing something
 plausible. Where a source has no linkable record, the citation stays plain
 text rather than pointing at a 404 — [how that resolves](docs/connectors.md#following-a-citation-back-to-the-record).
 
+## Show your working
+
+"It shows its sources" is easy to write and hard to mean. Three things back
+it up, and each is a thing you can open rather than a claim:
+
+- **Citations are verbatim.** The answer quotes the record, and the quote is
+  checked against what was actually retrieved. A quote the model invented is
+  flagged rather than printed.
+- **Every claim has an address.** A citation links to the Zoom recording, the
+  Intercom conversation, the Zendesk ticket. Where a source has no linkable
+  record, it stays plain text rather than pointing at a 404.
+- **You can ask how it got there.** `explain_answer` replays a specific
+  answer: which excerpts retrieval picked, how each one scored, which model
+  wrote it, and — if you ask — the literal prompt it was given.
+
+The same history renders as a vertical timeline, in the browser, in Slack, or
+in your terminal. [docs/timeline.md](docs/timeline.md)
+
+## It drafts, you decide
+
+Bellwether reads everywhere else. Filing an engineering ticket is the one
+place it writes into someone else's system, so it cannot do it on its own.
+
+Every path that can propose a ticket writes to Bellwether's own table and
+nowhere else. Filing is a separate step that takes a draft id, requires an
+approver's name, and files the text that person read — verbatim, no
+regeneration between approval and creation. Linear and Jira both supported.
+
+That's the shape of the code, not a setting. [docs/tickets.md](docs/tickets.md)
+
 ## Why it exists
 
 Customer success tooling is mostly built for the person reporting on the
@@ -131,7 +161,7 @@ once, so no two front ends can answer it differently.
 |---|---|---|
 | **Slack** | `@Bell how is Northwind doing?`, plus unprompted alerts when a tier changes | [Deploy, step 6](docs/deploy.md) |
 | **Microsoft Teams** | The same bot, same cards, for teams that don't live in Slack | [Deploy, step 6](docs/deploy.md) |
-| **Your coding agent** | Claude Code, Cursor, Codex and OpenCode reach the same context over MCP — four tools, three of which make no model call at all | [docs/mcp.md](docs/mcp.md) |
+| **Your coding agent** | Claude Code, Cursor, Codex and OpenCode reach the same context over MCP — nine tools, and only one of them spends a model call | [docs/mcp.md](docs/mcp.md) |
 | **Plain files** | `npm run context:pull` writes the whole context layer to markdown you can read, grep and diff | [docs/context-files.md](docs/context-files.md) |
 | **A timeline** | One vertical axis showing where every piece of context came from — as a page, as `/timeline <account>` in Slack, or as an MCP tool in your terminal | [docs/timeline.md](docs/timeline.md) |
 
@@ -223,6 +253,11 @@ rely on. Some edges are newer than others, and it's better to say which:
 - The **Salesforce and Attio** connectors are built against both vendors'
   current APIs but haven't yet been run against a live org. If you're the
   first, an issue either way would genuinely help.
+- **Ticket filing** is the newest thing here and the only one that writes
+  outward. Both providers are implemented from published API docs and have
+  not been run against a live workspace, so point it at a throwaway project
+  the first time. The draft-and-approve path around it is well covered by
+  tests; the two HTTP calls at the end are not.
 - **Google Meet** is backfill-only and Workspace-only; the caveats are in the
   connector's own source.
 - Tests cover the logic that's easy to get quietly wrong (health tiering,
@@ -239,11 +274,14 @@ all — a connector for a tool we don't support, a wrong assumption in the
 health tiering, a doc page that lied to you.
 
 Before opening a PR, run `npm test`, `npm run typecheck` and
-`npm run typecheck:scripts` in `worker/`. [docs/development.md](docs/development.md)
-covers the conventions worth knowing, including the shape every connector
-follows.
+`npm run typecheck:scripts` in `worker/`. [CONTRIBUTING.md](CONTRIBUTING.md)
+covers what a good PR looks like; [docs/development.md](docs/development.md)
+has the conventions, including the shape every connector follows.
 
 No CLA, no contributor agreement to sign. It's MIT; that's the whole deal.
+
+Found something exploitable? [SECURITY.md](SECURITY.md) — by email, not in a
+public issue.
 
 ## License
 
